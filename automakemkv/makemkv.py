@@ -6,6 +6,7 @@ from subprocess import Popen, PIPE, STDOUT
 
 from PyQt5 import QtCore
 
+from . import TEST_DATA_FILE
 from .mkvLookup import AP
 
 SPLIT = re.compile( r'(".*?"|[^,]+)' )
@@ -17,12 +18,13 @@ class MakeMKVParser( QtCore.QThread ):
 
     str_signal = QtCore.pyqtSignal(str)
 
-    def __init__(self, dev='/dev/sr0'):
+    def __init__(self, discDev='/dev/sr0', debug=False):
         super().__init__()
 
-        self._event = Event()
-        self.dev    = dev
-        self.titles = {}
+        self._event  = Event()
+        self._debug  = debug
+        self.discDev = discDev
+        self.titles  = {}
 
     def is_alive(self):
 
@@ -44,15 +46,20 @@ class MakeMKVParser( QtCore.QThread ):
         """
 
         self._event.set()
-        proc = Popen( 
-            ['makemkvcon', 'info', '-r', f'dev:{self.dev}'],
-            universal_newlines = True,
-            stdout = PIPE,
-            stderr = STDOUT
-        )
-        for line in iter(proc.stdout.readline, ''):
-            self.parseLine( line )
-        proc.wait()
+        if self._debug:
+            with open(TEST_DATA_FILE, 'r') as iid:
+                for line in iid.readlines():
+                    self.parseLine( line )
+        else:
+            proc = Popen( 
+                ['makemkvcon', 'info', '-r', f'dev:{self.discDev}'],
+                universal_newlines = True,
+                stdout = PIPE,
+                stderr = STDOUT
+            )
+            for line in iter(proc.stdout.readline, ''):
+                self.parseLine( line )
+            proc.wait()
         self._event.clear()
 
     def parseLine( self, line ):

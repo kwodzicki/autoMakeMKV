@@ -1,25 +1,15 @@
 from PyQt5 import QtCore, QtWidgets, QtGui, Qt
 
-from . import parseMakeMKV
+from ..makemkv import MakeMKVParser
+from .utils import checkInfo
 
-def buildFiles( info ):
+def main( discDev='/dev/sr0', **kwargs ):
 
-    if info['tmdb'] != '':
-        key = info['tmdb']
-        if not key.startswith('tmdb'):
-            key = f"tmdb{key}"
-    elif info['tvdb'] != '':
-        key = info['tvdb']
-        if not key.startswith('tvdb'):
-            key = f"tvdb{key}"
-    else:
-        raise Exception( 'Must enter either TMDb or TVDb' )
+    app = QtWidgets.QApplication(['MakeMKV MediaID'])
+    mediaIDs = MainWidget( discDev, **kwargs )
+    app.exec_()
 
-    files = {}
-    for title in info['titles']:
-        files[title[1]] = f"{key}.{title[0]}.mkv"
-
-    return files
+    return mediaIDs.info
 
 class MediaIDs( QtWidgets.QWidget ):
 
@@ -64,25 +54,39 @@ class MainWidget( QtWidgets.QMainWindow ):
 
     default_title = 'Default Title'
 
-    def __init__(self, *args, **kwargs ):
+    def __init__(self, discDev, *args, debug=False, **kwargs ):
 
         super().__init__(*args, **kwargs)
 
         self.titles  = None
         self.streams = None
+        self.info    = None
+
         self.tree    = QtWidgets.QTreeWidget()
         self.tree.setHeaderLabels( ['Type', 'Description'] )
+        self.tree.setColumnWidth( 0, 200 )
 
-        self.info   = QtWidgets.QTextEdit()
-        self.msgs   = QtWidgets.QTextEdit()
-        self.button = QtWidgets.QPushButton( 'Apply' )
+        self.type    = QtWidgets.QWidget()
+        self.isMovie = QtWidgets.QRadioButton( 'Movie' )
+        self.isTV    = QtWidgets.QRadioButton( 'TV Show' )
+        layout       = QtWidgets.QVBoxLayout()
+        layout.addWidget( self.isMovie )
+        layout.addWidget( self.isTV    )
+        self.type.setLayout( layout )
+
+        self.info    = QtWidgets.QTextEdit()
+        self.msgs    = QtWidgets.QTextEdit()
+        self.button  = QtWidgets.QPushButton( 'Apply' )
         self.button.clicked.connect( self.apply )
         self.button.setEnabled( False )
         self.msgs.setReadOnly(True)
 
         self.mediaIDs = MediaIDs()
         layout = QtWidgets.QGridLayout()
-        layout.addWidget( self.mediaIDs, 0, 0, 1, 2 ) 
+        layout.setColumnStretch(0, 2)
+        layout.setColumnStretch(1, 1)
+        layout.addWidget( self.mediaIDs, 0, 0, 1, 1 ) 
+        layout.addWidget( self.type,     0, 1, 1, 1 ) 
         layout.addWidget( self.tree,     1, 0, 1, 1 )
         layout.addWidget( self.info,     1, 1, 1, 1 )
         layout.addWidget( self.msgs,     2, 0, 1, 2 )
@@ -91,8 +95,9 @@ class MainWidget( QtWidgets.QMainWindow ):
         central = QtWidgets.QWidget()
         central.setLayout( layout )
         self.setCentralWidget( central )
-        
-        self.titlesThread = parseMakeMKV.MakeMKVParser()
+        self.resize( 720, 480 )
+
+        self.titlesThread = MakeMKVParser( discDev, debug=debug )
         self.titlesThread.str_signal.connect( self.msgs.append )
         self.titlesThread.finished.connect( self.buildTitleTree )
         self.titlesThread.start()
@@ -109,7 +114,16 @@ class MainWidget( QtWidgets.QMainWindow ):
 
         """
 
-        info   = self.mediaIDs.getDict()
+        info = {
+            'isMovie' : self.isMovie.isChecked(),
+            'isTV'    : self.isTV.isChecked(),
+        }
+        info.update( self.mediaIDs.getDict() )
+
+        if not checkInfo( info ):
+            print('Info failed checks!')
+            return
+
         titles = []
         root   = self.tree.invisibleRootItem()
         keys   = list( self.titles.keys() )       # Get keys from titles object; some have most likely changed, so need to index using order, not key
@@ -123,16 +137,20 @@ class MainWidget( QtWidgets.QMainWindow ):
                 (title, titleDict['Original Title Id'])
             )
 
-        info['titles'] = titles
-        files = buildFiles( info )
-        print( files )
+        if len(titles) == 0:
+            print('No titles marked for ripping!')
+            return
 
-    def updateInfo(self, info):
-        self.info.clear()
-        for key, val in info.items():
-            self.info.append(
-                f"{key} : {val}"
-            )
+        info['titles'] = titles
+
+        confirm = QtWidgets.QMessageBox()
+        res     = confirm.question(
+                self, '', 'Are you sure the information is correct?',
+                confirm.Yes | confirm.No
+        )
+        if res == confirm.Yes:
+            self.info = info
+            self.close()
 
     def selectTitle( self, obj, col ):
         """
@@ -155,9 +173,17 @@ class MainWidget( QtWidgets.QMainWindow ):
 
         title = str(obj)
         if title in self.titles:
-            self.updateInfo( self.titles[ title ] )
+            info = self.titles[ title ]
         elif title in self.streams:
-            self.updateInfo( self.streams[ title ] )
+            info = self.streams[ title ]
+        else:
+            return
+
+        self.info.clear()
+        for key, val in info.items():
+            self.info.append(
+                f"{key} : {val}"
+            )
 
     def buildTitleTree( self ):
 

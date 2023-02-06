@@ -3,6 +3,11 @@ from PyQt5 import QtCore, QtWidgets, QtGui, Qt
 from ..makemkv import MakeMKVParser
 from .utils import checkInfo
 
+TYPES = [
+    'edition', 'behindthescenes', 'deleted', 'featurette',
+    'interview', 'scene', 'short', 'trailer', 'other',
+]
+
 def main( discDev='/dev/sr0', **kwargs ):
 
     app = QtWidgets.QApplication(['MakeMKV MediaID'])
@@ -11,32 +16,57 @@ def main( discDev='/dev/sr0', **kwargs ):
 
     return mediaIDs.info
 
-class MediaIDs( QtWidgets.QWidget ):
+class DiscMetadata( QtWidgets.QWidget ):
 
     def __init__(self, *args, **kwargs ):
         super().__init__(*args, **kwargs)
 
         layout = QtWidgets.QGridLayout()
         layout.addWidget(
-            QtWidgets.QLabel( 'TheMovieDB ID' ),
+            QtWidgets.QLabel( 'Title' ),
             0, 0
         )
         layout.addWidget(
-            QtWidgets.QLabel( 'TheTVDB ID' ),
+            QtWidgets.QLabel( 'Year' ),
             1, 0
+        )
+
+        layout.addWidget(
+            QtWidgets.QLabel( 'TheMovieDB ID' ),
+            0, 2
+        )
+        layout.addWidget(
+            QtWidgets.QLabel( 'TheTVDB ID' ),
+            1, 2
         )
         layout.addWidget(
             QtWidgets.QLabel( 'IMDb ID' ),
-            2, 0
+            2, 2
         )
 
-        self.tmdb = QtWidgets.QLineEdit()
-        self.tvdb = QtWidgets.QLineEdit()
-        self.imdb = QtWidgets.QLineEdit()
+        self.title    = QtWidgets.QLineEdit()
+        self.year     = QtWidgets.QLineEdit()
+        self.tmdb     = QtWidgets.QLineEdit()
+        self.tvdb     = QtWidgets.QLineEdit()
+        self.imdb     = QtWidgets.QLineEdit()
 
-        layout.addWidget( self.tmdb, 0, 1 )
-        layout.addWidget( self.tvdb, 1, 1 )
-        layout.addWidget( self.imdb, 2, 1 )
+        self.isMovie  = QtWidgets.QRadioButton( 'Movie' )
+        self.isSeries = QtWidgets.QRadioButton( 'Series' )
+
+
+        self.title.setPlaceholderText( 'Movie/Series Title' )
+        self.year.setPlaceholderText(  'Movie/Series Release/First Aired' )
+        self.tmdb.setPlaceholderText(  'Movie/Series ID' )
+        self.tvdb.setPlaceholderText(  'Movie/Series ID' )
+        self.imdb.setPlaceholderText(  'Movie/Series ID' )
+
+        layout.addWidget( self.title,    0, 1 )
+        layout.addWidget( self.year,     1, 1 )
+        layout.addWidget( self.isMovie,  2, 0 )
+        layout.addWidget( self.isSeries, 2, 1 )
+        layout.addWidget( self.tmdb,     0, 3 )
+        layout.addWidget( self.tvdb,     1, 3 )
+        layout.addWidget( self.imdb,     2, 3 )
 
         self.setLayout( layout )
 
@@ -44,15 +74,46 @@ class MediaIDs( QtWidgets.QWidget ):
 
     def getDict(self):
 
-        return {
-            'tmdb' : self.tmdb.text(),
-            'tvdb' : self.tvdb.text(),
-            'imdb' : self.imdb.text(),
+        info = {
+            'title'    : self.title.text(),
+            'year'     : self.year.text(),
+            'tmdb'     : self.tmdb.text(),
+            'tvdb'     : self.tvdb.text(),
+            'imdb'     : self.imdb.text(),
+            'isMovie'  : self.isMovie.isChecked(),
+            'isSeries' : self.isSeries.isChecked(),
         }
 
+        if checkInfo( self, info ):
+            return info
+        return None
+
+class TitleMetadata( QtWidgets.QWidget ):
+
+    def __init__(self, *args, **kwargs ):
+        super().__init__(*args, **kwargs)
+
+        layout = QtWidgets.QGridLayout()
+        layout.addWidget(
+            QtWidgets.QLabel('Title'), 0, 0
+        )
+        layout.addWidget(
+            QtWidgets.QLabel('Type'), 3, 0
+        )
+
+        self.title   = QtWidgets.QLineEdit()
+        self.type    = QtWidgets.QComboBox()
+        self.type.addItems( TYPES )
+
+        layout.addWidget( self.title, 0, 1)
+        layout.addWidget( self.type,  3, 1)
+
+        self.setLayout( layout )
+    
+        
 class MainWidget( QtWidgets.QMainWindow ):
 
-    default_title = 'Default Title'
+    default_title = 'Title'
 
     def __init__(self, discDev, *args, debug=False, **kwargs ):
 
@@ -64,15 +125,7 @@ class MainWidget( QtWidgets.QMainWindow ):
 
         self.tree    = QtWidgets.QTreeWidget()
         self.tree.setHeaderLabels( ['Type', 'Description'] )
-        self.tree.setColumnWidth( 0, 200 )
-
-        self.type    = QtWidgets.QWidget()
-        self.isMovie = QtWidgets.QRadioButton( 'Movie' )
-        self.isTV    = QtWidgets.QRadioButton( 'TV Show' )
-        layout       = QtWidgets.QVBoxLayout()
-        layout.addWidget( self.isMovie )
-        layout.addWidget( self.isTV    )
-        self.type.setLayout( layout )
+        self.tree.setColumnWidth( 0, 150 )
 
         self.info    = QtWidgets.QTextEdit()
         self.msgs    = QtWidgets.QTextEdit()
@@ -81,21 +134,23 @@ class MainWidget( QtWidgets.QMainWindow ):
         self.button.setEnabled( False )
         self.msgs.setReadOnly(True)
 
-        self.mediaIDs = MediaIDs()
+        self.titleMetadata = TitleMetadata()
+
+        self.discMetadata = DiscMetadata()
         layout = QtWidgets.QGridLayout()
-        layout.setColumnStretch(0, 2)
-        layout.setColumnStretch(1, 1)
-        layout.addWidget( self.mediaIDs, 0, 0, 1, 1 ) 
-        layout.addWidget( self.type,     0, 1, 1, 1 ) 
-        layout.addWidget( self.tree,     1, 0, 1, 1 )
-        layout.addWidget( self.info,     1, 1, 1, 1 )
-        layout.addWidget( self.msgs,     2, 0, 1, 2 )
-        layout.addWidget( self.button,   3, 0, 1, 2 )
+        layout.setColumnStretch(0, 3)
+        layout.setColumnStretch(1, 2)
+        layout.addWidget( self.discMetadata,  0, 0, 1, 2 ) 
+        layout.addWidget( self.tree,          1, 0, 2, 1 )
+        layout.addWidget( self.info,          1, 1, 1, 1 )
+        layout.addWidget( self.titleMetadata, 2, 1, 1, 1 )
+        layout.addWidget( self.msgs,          3, 0, 1, 2 )
+        layout.addWidget( self.button,        4, 0, 1, 2 )
 
         central = QtWidgets.QWidget()
         central.setLayout( layout )
         self.setCentralWidget( central )
-        self.resize( 720, 480 )
+        self.resize( 720, 720 )
 
         self.titlesThread = MakeMKVParser( discDev, debug=debug )
         self.titlesThread.str_signal.connect( self.msgs.append )
@@ -114,15 +169,7 @@ class MainWidget( QtWidgets.QMainWindow ):
 
         """
 
-        info = {
-            'isMovie' : self.isMovie.isChecked(),
-            'isTV'    : self.isTV.isChecked(),
-        }
-        info.update( self.mediaIDs.getDict() )
-
-        if not checkInfo( info ):
-            print('Info failed checks!')
-            return
+        info = self.discMetadata.getDict()
 
         titles = []
         root   = self.tree.invisibleRootItem()
@@ -199,7 +246,8 @@ class MainWidget( QtWidgets.QMainWindow ):
             title.setText( 0, f'{self.default_title} {titleID}')
             title.setText( 1, titleInfo['Tree Info'] )
 
-            title.setFlags( title.flags() | QtCore.Qt.ItemIsEditable )
+            title.setFlags( title.flags() | QtCore.Qt.ItemIsUserCheckable )
+            title.setCheckState(0, False )
 
             for streamID, streamInfo in titleInfo.pop('streams').items():
                 child = QtWidgets.QTreeWidgetItem(title)

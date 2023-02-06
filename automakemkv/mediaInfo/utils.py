@@ -1,17 +1,31 @@
 import os, json, gzip
 
+from PyQt5.QtWidgets import QMessageBox
+
 from .. import DBDIR
 
 EXT = '.json.gz'
-def checkInfo( info ):
+def checkInfo( parent, info ):
 
-    if not info['isMovie'] and not info['isTV']:
-        return False
+    message = None
+    if not info['isMovie'] and not info['isSeries']:
+        message = "Must select 'Movie' or 'Series'"
     elif info['isMovie'] and info['tmdb'] == '':
-        return False
-    elif info['isTV'] and info['tvdb'] == '':
-        return False
-    return True
+        message = "Must set TMDb ID"
+    elif info['isSeries'] and info['tvdb'] == '':
+        message = "Must set TVDb ID"
+    elif info['title'] == '':
+        message = "Must set Movie/Series Title"
+    elif info['year'] == '':
+        message = "Must set Movie/Series release year"
+
+    if message is None:
+        return True
+
+    box = QMessageBox(parent)
+    box.setText( message )
+    box.exec_()
+    return False
 
 def buildFiles( info ):
 

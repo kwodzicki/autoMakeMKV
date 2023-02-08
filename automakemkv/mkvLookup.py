@@ -23,7 +23,7 @@ AP = {
         '21' : 'Video Frame Rate',
         '22' : 'Stream Flags',
         '23' : 'Date Time',
-        '24' : 'Original Title Id',
+        '24' : 'Source Title Id',
         '25' : 'Segments Count',
         '26' : 'Segments Map',
         '27' : 'Output FileName',

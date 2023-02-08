@@ -1,66 +1,76 @@
-import re
+import logging
+import os, re, tempfile
 
-from threading import Event
 from queue import Queue
 from subprocess import Popen, PIPE, STDOUT
 
 from PyQt5 import QtCore
 
-from . import TEST_DATA_FILE
+from . import TEST_DATA_FILE, DBDIR
 from .mkvLookup import AP
+from .mediaInfo.utils import infoPath
 
 SPLIT = re.compile( r'(".*?"|[^,]+)' )
 
-class MakeMKVParser( QtCore.QThread ):
+def makeMKV( command, *args, **opts ):
+    log = logging.getLogger(__name__)
+
+    if command not in ('info', 'mkv', 'backup', 'f', 'reg'):
+        log.error( f"Unsupported command : '{command}'" )
+        return False
+
+    cmd = ['makemkvcon', command]
+    for key, val in opts.items():
+        kkey = f"--{key}"
+        if key in ('noscan', 'decrypt', 'robot'):
+            if val is True: cmd.append( kkey )
+        else:
+            if isinstance(val, bool):
+                val = str(val).lower()
+            cmd.extend( [kkey, str(val)] )
+    cmd.extend( args )
+
+    return Popen(
+        cmd,
+        universal_newlines = True,
+        stdout = PIPE,
+        stderr = STDOUT
+    )
+
+class MakeMKVParser( object ):
     """
     Class to parse makemkvcon output
     """
 
-    str_signal = QtCore.pyqtSignal(str)
-
-    def __init__(self, discDev='/dev/sr0', debug=False):
+    def __init__(self, discDev='/dev/sr0', **kwargs):
         super().__init__()
 
-        self._event  = Event()
-        self._debug  = debug
-        self.discDev = discDev
-        self.titles  = {}
+        self._debug   = kwargs.get('debug', False)
+        self.discDev  = discDev
+        self.infoPath = infoPath( discDev )
+        self.titles   = {}
 
-    def is_alive(self):
+    def loadFile(self, json=None):
 
-        return self._event.is_set()
-
-    def run(self):
-        """
-        Run as separate thread
-
-        This thread will start the makemkvcon process
-        and iterate over the output from the command 
-        line by line, parsing each line.
-
-        Message lines are put on a Queue() object so
-        that GUI is updated as scanning disc.
-        Title/stream information is parsed and appended
-        to a dictionary for later use.
-
-        """
-
-        self._event.set()
-        if self._debug:
-            with open(TEST_DATA_FILE, 'r') as iid:
-                for line in iid.readlines():
-                    self.parseLine( line )
+        self.titles = {}
+        if json is None:
+            fpath = self.infoPath
         else:
-            proc = Popen( 
-                ['makemkvcon', 'info', '-r', f'dev:{self.discDev}'],
-                universal_newlines = True,
-                stdout = PIPE,
-                stderr = STDOUT
-            )
-            for line in iter(proc.stdout.readline, ''):
+            fpath = os.path.splitext(json)[0]+'.info'
+        with open(fpath, 'r') as iid:
+            for line in iid.readlines():
                 self.parseLine( line )
-            proc.wait()
-        self._event.clear()
+
+    def scanDisc(self):
+
+        if self.infoPath is None:
+            return
+        proc = makeMKV('info', f'dev:{self.discDev}', minlength=0, robot=True)
+        with open( self.infoPath, 'w' ) as fid:
+            for line in iter(proc.stdout.readline, ''):
+                fid.write( line )
+                self.parseLine( line )
+        proc.wait()
 
     def parseLine( self, line ):
         """Parse lines from makemkvcon"""
@@ -86,3 +96,30 @@ class MakeMKVParser( QtCore.QThread ):
                 tt[stream] = {}
             if sid in AP:
                 tt[stream][ AP[sid] ] = val.strip('"')
+
+class MakeMKVThread( MakeMKVParser, QtCore.QThread ):
+    """
+    Class to parse makemkvcon output
+    """
+
+    str_signal = QtCore.pyqtSignal(str)
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    def run(self):
+        """
+        Run as separate thread
+
+        This thread will start the makemkvcon process
+        and iterate over the output from the command 
+        line by line, parsing each line.
+
+        Message lines are put on a Queue() object so
+        that GUI is updated as scanning disc.
+        Title/stream information is parsed and appended
+        to a dictionary for later use.
+
+        """
+
+        self.scanDisc()

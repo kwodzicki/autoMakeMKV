@@ -1,10 +1,11 @@
-import os, json, gzip
+import os, json
 
 from PyQt5.QtWidgets import QMessageBox
 
-from .. import DBDIR
+from .. import DBDIR, UUID_ROOT
 
-EXT = '.json.gz'
+EXT = '.json'
+
 def checkInfo( parent, info ):
 
     message = None
@@ -27,38 +28,34 @@ def checkInfo( parent, info ):
     box.exec_()
     return False
 
-def buildFiles( info ):
+def getDiscID( discDev, root=UUID_ROOT, **kwargs ):
 
-    files = {}
-    if not checkInfo( info ):
-        return files
+    for item in os.listdir( root ):
+        path = os.path.join( root, item )
+        src  = os.readlink( path )
+        src  = os.path.abspath( os.path.join(root, src) )
+        if src == discDev:
+            return item
+    return None
 
-    if info['isMovie']:
-        key = 'tmdb'
-    elif info['isTV']:
-        key = 'tvdb'
-    
-    vid = info[key]
-    if not vid.startswith(key):
-        vid = f"{key}{vid}"
-    else:
-        raise Exception( 'Must enter either TMDb or TVDb' )
+def infoPath( discDev, **kwargs ):
 
-    for title in info['titles']:
-        files[title[1]] = f"{vid}.{title[0]}.mkv"
-
-    return files
-
-def loadData( discID ):
-
-    fpath = os.path.join( DBDIR, f"{discID}{EXT}" )
-    if not os.path.isfile( fpath ):
+    uuid = getDiscID( discDev, **kwargs )
+    if uuid is None:
         return None
+    return os.path.join( DBDIR, f"{uuid}.info" )
 
-    with gzip.open(fpath, 'rt') as fid:
+def loadData( discID=None, fpath=None ):
+
+    if fpath is None:
+        fpath = os.path.join( DBDIR, f"{discID}{EXT}" )
+    if not os.path.isfile( fpath ):
+        return {} 
+
+    with open(fpath, 'r') as fid:
         return json.load(fid)
 
-def saveData( discID, info, replace=False ):
+def saveData( info, discDev=None, discID=None, fpath=None, replace=False ):
     """
     Arguments:
         discID (str) : Unique disc ID
@@ -67,11 +64,16 @@ def saveData( discID, info, replace=False ):
 
     """
 
-    fpath = os.path.join( DBDIR, f"{discID}{EXT}" )
+    if fpath is None:
+        if discDev is not None:
+            discID = getDiscID( discDev )
+        fpath = os.path.join( DBDIR, f"{discID}{EXT}" )
+
     if os.path.isfile( fpath ) and not replace:
         return False
 
-    with gzip.open(fpath, 'wt') as fid:
+    info['discID'] = discID
+    with open(fpath, 'w') as fid:
         json.dump(info, fid, indent=4)
 
     return True

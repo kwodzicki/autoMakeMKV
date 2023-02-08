@@ -1,7 +1,11 @@
 #!/usr/bin/env python3
-
-from automakemkv.ripper import main
+import argparse
+from automakemkv.ripper import watchdog 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument( 'outdir', type=str, help='Directory to save ripped titles to')
+    parser.add_argument( '--extras', action='store_true', help="If set, all 'extra' content from disc will be ripped" )
 
-    main()
+    args = parser.parse_args()
+    watchdog( args.outdir, extras=args.extras )

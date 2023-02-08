@@ -1,24 +1,15 @@
 import os
 
-from .utils import loadData, saveData
+from .utils import getDiscID, loadData
 from .gui import main
 
 def getTitleInfo( discDev, root ):
 
-    uuid = None
-    for item in os.listdir( root ):
-        path = os.path.join( root, item )
-        src  = os.readlink( path )
-        src  = os.path.abspath( os.path.join(root, src) )
-        if src == discDev:
-            uuid = item
-            break
-
+    uuid = getDiscID( discDev, root )
     if uuid is None: return
 
-    info = loadData( uuid )
-    if info is None:
+    info = loadData( discID=uuid )
+    if len(info) == 0:
         info = main( discDev )
-        saveData( uuid, info )
 
     return info

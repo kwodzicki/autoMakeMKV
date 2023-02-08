@@ -8,5 +8,6 @@ DBDIR  = os.path.join( os.path.expanduser('~'), f".{__name__}DB" )
 TEST_DATA_FILE = os.path.join(
     APPDIR, 'testing.txt'
 )
-
 os.makedirs( DBDIR, exist_ok=True )
+
+UUID_ROOT = "/dev/disk/by-uuid"

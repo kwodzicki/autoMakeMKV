@@ -19,6 +19,8 @@ def main( discDev='/dev/sr0', **kwargs ):
     mediaIDs = MainWidget( discDev, **kwargs )
     app.exec_()
 
+    return mediaIDs.info
+
 class DiscMetadata( QtWidgets.QWidget ):
     """
     Widget for disc metadata
@@ -330,6 +332,7 @@ class MainWidget( QtWidgets.QMainWindow ):
 
         self._initMenu()
         self.curTitle  = None
+        self.info      = None
         self.discID    = getDiscID( discDev )
 
         self.titleTree = QtWidgets.QTreeWidget()
@@ -447,6 +450,7 @@ class MainWidget( QtWidgets.QMainWindow ):
         )
         if res == confirm.Yes:
             saveData(info, discID=self.discID, replace=True)
+            self.info = info
             self.close()
 
     def selectTitle( self, obj, col ):

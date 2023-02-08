@@ -4,4 +4,4 @@ from automakemkv.mediaInfo import main
 
 if __name__ == "__main__":
 
-    main(debug=len(sys.argv)>1)
+    x = main(debug=len(sys.argv)>1)

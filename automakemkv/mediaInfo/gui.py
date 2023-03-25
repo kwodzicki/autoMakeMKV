@@ -534,10 +534,16 @@ class MainWidget( QtWidgets.QMainWindow ):
                 title.info = infoTitles[titleID]
                 title.setCheckState(0, 2)
             else:
+                keys = ['Source Title Id', 'Source FileName', 'Segments Map']
                 title.info = {
-                    'Source Title Id' : titleInfo['Source Title Id'],
-                    'Segments Map'    : titleInfo['Segments Map'],    
+                        key : titleInfo.get(key, '') for key in keys
                 }
+                    
+                #print( titleInfo )
+                #title.info = {
+                #    'Source Title Id' : titleInfo['Source Title Id'],
+                #    'Segments Map'    : titleInfo['Segments Map'],    
+                #}
             # Used to update old files to contain the Segments Map
             #if 'Segments Map' not in title.info:
             #    title.info['Segments Map'] = titleInfo['Segments Map']

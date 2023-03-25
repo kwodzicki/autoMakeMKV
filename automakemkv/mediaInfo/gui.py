@@ -1,8 +1,9 @@
+import logging
 import os
 
 from PyQt5 import QtCore, QtWidgets, QtGui, Qt
 
-from ..makemkv import MakeMKVParser, MakeMKVThread
+from ..makemkv import MakeMKVThread
 from .utils import DBDIR, checkInfo, getDiscID, loadData, saveData
 
 EXTRATYPES = [ 
@@ -36,6 +37,7 @@ class DiscMetadata( QtWidgets.QWidget ):
     def __init__(self, *args, **kwargs ):
         super().__init__(*args, **kwargs)
 
+        self.log = logging.getLogger( __name__ )
         layout = QtWidgets.QGridLayout()
 
         layout.addWidget( QtWidgets.QLabel( 'Title' ),         0, 0 )
@@ -95,6 +97,7 @@ class DiscMetadata( QtWidgets.QWidget ):
 
         """
 
+        self.log.debug( 'Getting disc metadata from widget' )
         info = {
             'title'    : self.title.text(),
             'year'     : self.year.text(),
@@ -112,6 +115,7 @@ class DiscMetadata( QtWidgets.QWidget ):
 
     def setInfo(self, info):
 
+        self.log.debug( 'Setting disc metadata fro widget' )
         self.title.setText( info.get('title', '') )
         self.year.setText(  info.get('year',  '') ) 
         self.tmdb.setText(  info.get('tmdb',  '') ) 
@@ -137,6 +141,7 @@ class TitleMetadata( QtWidgets.QWidget ):
     def __init__(self, *args, **kwargs ):
         super().__init__(*args, **kwargs)
 
+        self.log = logging.getLogger( __name__ )
         layout = QtWidgets.QGridLayout()
 
         self.seasonLabel, self.season = (
@@ -187,6 +192,7 @@ class TitleMetadata( QtWidgets.QWidget ):
 
         """
 
+        self.log.debug( 'Getting title metadata from widget' )
         info = {
             'extra'      : self.extra.currentText(),
             'extraTitle' : self.extraTitle.text(),
@@ -219,6 +225,7 @@ class TitleMetadata( QtWidgets.QWidget ):
 
         """
 
+        self.log.debug( 'setting title metadata for widget' )
         self.season.setText(       info.get('season',       '' ) )
         self.episode.setText(      info.get('episode',      '' ) )
         self.episodeTitle.setText( info.get('episodeTitle', '' ) )
@@ -330,10 +337,15 @@ class MainWidget( QtWidgets.QMainWindow ):
 
         super().__init__(*args, **kwargs)
 
+        self.log = logging.getLogger( __name__ )
         self._initMenu()
         self.curTitle  = None
         self.info      = None
+        self.discDev   = discDev
         self.discID    = getDiscID( discDev )
+        self.discLabel = None
+
+        self.setWindowTitle()
 
         self.titleTree = QtWidgets.QTreeWidget()
         self.titleTree.setHeaderLabels( ['Type', 'Description'] )
@@ -370,15 +382,16 @@ class MainWidget( QtWidgets.QMainWindow ):
         self.setCentralWidget( central )
         self.resize( 720, 720 )
 
-        self.titlesThread = MakeMKVThread( discDev, debug=debug )
-        self.titlesThread.str_signal.connect( self.msgs.append )
-        self.titlesThread.finished.connect( self.buildTitleTree )
-        self.titlesThread.start()
+        self.loadDisc = MakeMKVThread( discDev, debug=debug )
+        self.loadDisc.signal.connect( self.msgs.append )
+        self.loadDisc.finished.connect( self.buildTitleTree )
+        self.loadDisc.start()
 
         self.show()
 
     def _initMenu(self):
 
+        self.log.debug( 'Initializing menu' )
         menuBar    = self.menuBar()
 
         fileMenu   = menuBar.addMenu("File")
@@ -392,8 +405,16 @@ class MainWidget( QtWidgets.QMainWindow ):
         fileMenu.addSeparator()
         fileMenu.addAction("Quit")
 
+    def setWindowTitle( self ):
+
+        title = f"{self.discDev} [{self.discID}]"
+        if self.discLabel:
+            title = f"{title} - {self.discLabel}"
+        super().setWindowTitle( title )
+
     def open( self, *args, **kwargs ):
 
+        self.log.debug( 'Attempting to open disc JSON for editing' )
         dialog = QtWidgets.QFileDialog( directory=DBDIR )
         dialog.setDefaultSuffix('json')
         dialog.setNameFilters( ['JSON (*.json)'] )
@@ -407,7 +428,8 @@ class MainWidget( QtWidgets.QMainWindow ):
             box.exec_()
             return
 
-        self.titlesThread.loadFile( json=files[0] )
+        self.msgs.clear()
+        self.loadDisc.loadFile( json=files[0] )
         self.buildTitleTree( loadData( fpath=files[0] ) ) 
 
     def save( self, *args, **kwargs ):
@@ -420,6 +442,7 @@ class MainWidget( QtWidgets.QMainWindow ):
 
         """
 
+        self.log.debug( 'Saving data JSON' )
         info = self.discMetadata.getInfo()
         if info is None: return 
 
@@ -489,12 +512,16 @@ class MainWidget( QtWidgets.QMainWindow ):
     def buildTitleTree( self, info=None ):
 
         self.titleTree.clear()
-        titles = self.titlesThread.titles
+        discInfo = self.loadDisc.discInfo
+        titles   = self.loadDisc.titles
         infoTitles = {}
         if info is not None:
             self.discID = info['discID']
             self.discMetadata.setInfo( info )
             infoTitles = info['titles']
+
+        self.discLabel = discInfo.get('Name', None)
+        self.setWindowTitle()
 
         # NOTE create nested data
         for titleID, titleInfo in titles.items():
@@ -507,7 +534,13 @@ class MainWidget( QtWidgets.QMainWindow ):
                 title.info = infoTitles[titleID]
                 title.setCheckState(0, 2)
             else:
-                title.info = {'Source Title Id' : titleInfo['Source Title Id']}
+                title.info = {
+                    'Source Title Id' : titleInfo['Source Title Id'],
+                    'Segments Map'    : titleInfo['Segments Map'],    
+                }
+            # Used to update old files to contain the Segments Map
+            #if 'Segments Map' not in title.info:
+            #    title.info['Segments Map'] = titleInfo['Segments Map']
             title.setText( 0, self.default_title)
             title.setText( 1, titleInfo['Tree Info'] )
 

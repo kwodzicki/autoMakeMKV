@@ -43,7 +43,7 @@ def infoPath( discDev, **kwargs ):
     uuid = getDiscID( discDev, **kwargs )
     if uuid is None:
         return None
-    return os.path.join( DBDIR, f"{uuid}.info" )
+    return os.path.join( DBDIR, f"{uuid}.info.gz" )
 
 def loadData( discID=None, fpath=None ):
 

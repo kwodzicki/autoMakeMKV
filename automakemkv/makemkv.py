@@ -1,5 +1,5 @@
 import logging
-import os, re, tempfile
+import os, re, gzip
 
 from queue import Queue
 from subprocess import Popen, PIPE, STDOUT
@@ -30,6 +30,7 @@ def makeMKV( command, *args, **opts ):
             cmd.extend( [kkey, str(val)] )
     cmd.extend( args )
 
+    log.debug( f"Running command : {' '.join(cmd)}" )
     return Popen(
         cmd,
         universal_newlines = True,
@@ -48,7 +49,9 @@ class MakeMKVParser( object ):
         self._debug   = kwargs.get('debug', False)
         self.discDev  = discDev
         self.infoPath = infoPath( discDev )
+        self.discInfo = {}
         self.titles   = {}
+        self.log      = logging.getLogger(__name__).debug
 
     def loadFile(self, json=None):
 
@@ -56,8 +59,8 @@ class MakeMKVParser( object ):
         if json is None:
             fpath = self.infoPath
         else:
-            fpath = os.path.splitext(json)[0]+'.info'
-        with open(fpath, 'r') as iid:
+            fpath = os.path.splitext(json)[0]+'.info.gz'
+        with gzip.open(fpath, 'rt') as iid:
             for line in iid.readlines():
                 self.parseLine( line )
 
@@ -66,7 +69,7 @@ class MakeMKVParser( object ):
         if self.infoPath is None:
             return
         proc = makeMKV('info', f'dev:{self.discDev}', minlength=0, robot=True)
-        with open( self.infoPath, 'w' ) as fid:
+        with gzip.open( self.infoPath, 'wt' ) as fid:
             for line in iter(proc.stdout.readline, ''):
                 fid.write( line )
                 self.parseLine( line )
@@ -75,14 +78,16 @@ class MakeMKVParser( object ):
     def parseLine( self, line ):
         """Parse lines from makemkvcon"""
 
-        try:
-            infoType, data = line.strip().split(':')
-        except:
-            return
+        infoType, *data = line.strip().split(':')
+        data = ':'.join( data )
 
         if infoType == 'MSG':
             _, _, _, val, *_ = SPLIT.findall( data )
-            self.str_signal.emit( val.strip('"') )
+            self.log( val.strip('"') )
+        elif infoType == 'CINFO':
+            cid, code, val = SPLIT.findall( data )
+            if cid in AP:
+                self.discInfo[ AP[cid] ] = val.strip('"') 
         elif infoType == 'TINFO':
             title, tid, code, val = SPLIT.findall( data )
             if title not in self.titles:
@@ -102,10 +107,12 @@ class MakeMKVThread( MakeMKVParser, QtCore.QThread ):
     Class to parse makemkvcon output
     """
 
-    str_signal = QtCore.pyqtSignal(str)
+    signal = QtCore.pyqtSignal(str)
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+
+        self.log = self.signal.emit
 
     def run(self):
         """

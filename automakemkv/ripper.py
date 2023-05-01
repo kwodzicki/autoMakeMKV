@@ -19,7 +19,7 @@ RUNNING.set()
 signal.signal( signal.SIGINT,  lambda *args : RUNNING.clear() )
 signal.signal( signal.SIGTERM, lambda *args : RUNNING.clear() )
 
-def watchdog( outdir, extras=False, root=UUID_ROOT, fileGen=video_utils_outfile):
+def watchdog( outdir, all=False, extras=False, root=UUID_ROOT, fileGen=video_utils_outfile):
     """
     Main watchdog for disc monitoring/ripping
 
@@ -37,7 +37,10 @@ def watchdog( outdir, extras=False, root=UUID_ROOT, fileGen=video_utils_outfile)
             files
 
     Keyword arguments:
-        extras (bool) : If set, all 'extra' features will
+        all (bool) : If set, then all titles identified
+            for ripping will be ripped. By default, only the
+            main feature will be ripped
+        extras (bool) : If set, only 'extra' features will
             be ripped along with the main title(s). Main
             title(s) include Theatrical/Extended/etc. 
             versions for movies, and episodes for series.
@@ -67,10 +70,10 @@ def watchdog( outdir, extras=False, root=UUID_ROOT, fileGen=video_utils_outfile)
 
         Process( 
             target = ripDisc,
-            args   = (dev, root, outdir, extras, fileGen),
+            args   = (dev, root, outdir, all, extras, fileGen),
         ).start()
 
-def ripDisc( dev, root, outdir, extras, fileGen ):
+def ripDisc( dev, root, outdir, all, extras, fileGen ):
     """
     Rip a whole disc
 
@@ -95,7 +98,7 @@ def ripDisc( dev, root, outdir, extras, fileGen ):
         log.error( f"No title information found/entered : {dev}" )
         return
 
-    for title, fpath in fileGen( outdir, info, extras=extras ):
+    for title, fpath in fileGen( outdir, info, all=all, extras=extras ):
         ripTitle( f"dev:{dev}", title, fpath )
 
     try:

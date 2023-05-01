@@ -10,6 +10,9 @@ program suite.
 """
 
 import os
+import re
+
+BADCHARS = re.compile( '[#%\\\<\>\*\?/\$\!\:\@]' )                                   # Characters that are not allowed in file paths
 
 def formatDbKey( info ):
     """
@@ -98,14 +101,44 @@ def video_utils_dbkey( info ):
     raise Exception('Failed to get database ID')
 
 
-def video_utils_movie( outdir, info, ext, *args, **kwargs ):
+def video_utils_movie( outdir, info, ext, all, extras, **kwargs ):
+    """
+    Generate video_utils compliant movie name
+
+    Will create filenames for movies that are compatiable
+    with the input file naming convention for the video_utils
+    MakeMKV_Watchdog.
+
+    Arguments:
+        outdir (str) : Output directory for ripped title/track
+        info (dict) : Contains information about all titles on
+            dics that could/should be ripped
+        ext (str) : File extension
+        all (boo) : If set, then all titles (i.e., feature and
+            all extras) are ripped.
+        extras (bool) : If set, then only extras are ripped
+
+    Keyword arguments:
+        **kwargs :
+
+    Returns:
+        generator : Will return tuple of track ID for MakeMKV and 
+            full-path of output file
+
+    """
 
     for tid, title in info['titles'].items():
-        if title['extra'] == 'edition':
-            fpath = [ video_utils_dbkey( info ), title['extraTitle'] ] 
-        else:
+        fpath = [ video_utils_dbkey(info), '' ]
+        # If extraTitle is NOT empty, then title is an extra
+        if title['extraTitle'] != '':
+            # If neither all nor extras is set, then we aren't ripping extras
+            if not (all or extras): continue
+            extra = [title['extra'], replaceChars(title['extraTitle'])]
+            if extra[0] != 'edition':
+                extra = extra[::-1]
+            fpath[-1] = '-'.join(extra)
+        elif extras:
             continue
-
         yield tid, os.path.join( outdir, '.'.join(fpath)+ext )
 
 def video_utils_series( outdir, info, ext, *args, **kwargs ):
@@ -120,7 +153,7 @@ def video_utils_series( outdir, info, ext, *args, **kwargs ):
 
         yield tid, os.path.join( outdir, '.'.join(fpath)+ext )
 
-def video_utils_outfile( outdir, info, ext='.mkv', extras=False ):
+def video_utils_outfile( outdir, info, ext='.mkv', all=False, extras=False ):
 
     if not os.path.isdir( outdir ):
         os.makedirs( outdir )
@@ -131,4 +164,44 @@ def video_utils_outfile( outdir, info, ext='.mkv', extras=False ):
     elif info['isSeries']:
         func = video_utils_series
 
-    yield from func( outdir, info, ext, extras )
+    yield from func( outdir, info, ext, all, extras )
+
+
+def _replace( string, repl, **kwargs ):                                         
+    """                                                                           
+    'Private' function for replace characters in string                           
+    
+    Arguments:                                                                    
+        string (str): String to have characters replaced                            
+        repl (str): String to replace bad characters with                           
+    
+    Keyword arguments:                                                            
+        **kwargs: Any, none used currently                                          
+    
+    Returns:                                                                      
+        str: String with bad values repaced by repl value                           
+    
+    """                                                                           
+    
+    return BADCHARS.sub( repl, string ).replace('&', 'and').strip()               
+
+def replaceChars( *args, repl = ' ', **kwargs ):                                
+    """                                                                           
+    Replace invalid path characters; '&' replaced with 'and'                      
+    
+    Arguments:                                                                    
+        *args (str): String(s) to replace characters in                             
+    
+    Keyword arguments:                                                            
+        repl (str): String to replace bad characters with; default is space (' ')   
+        **kwargs                                                                    
+    
+    Returns:                                                                      
+        String, or list, with bad values replaced by repl value                     
+    
+    """                                                                           
+    
+    if len(args) == 1:                                                                    # If one input argument
+        return _replace( args[0], repl, **kwargs )                                          # Return single value
+    return [ _replace( arg, repl, **kwargs ) for arg in args ]                            # Iterate over all input arguments, returning list
+

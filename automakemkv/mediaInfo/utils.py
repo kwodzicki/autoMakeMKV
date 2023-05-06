@@ -38,7 +38,7 @@ def getDiscID( discDev, root=UUID_ROOT, **kwargs ):
             return item
     return None
 
-def infoPath( discDev, **kwargs ):
+def info_path( discDev, **kwargs ):
 
     uuid = getDiscID( discDev, **kwargs )
     if uuid is None:

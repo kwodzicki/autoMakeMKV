@@ -1,17 +1,24 @@
+"""
+Utilities for ripping titles
+
+"""
+
 import logging
 import os
+import signal
+import time
 from multiprocessing import Process
 from threading import Event
-import signal
 
 import pyudev
 
 from . import UUID_ROOT
 from .mediaInfo import getTitleInfo
-from .makemkv import makeMKV
+from .makemkv import makemkvcon
 from .utils import video_utils_outfile
 
 KEY = 'DEVNAME'
+TIMEOUT = 5.0
 
 RUNNING = Event()
 RUNNING.set()
@@ -19,7 +26,7 @@ RUNNING.set()
 signal.signal( signal.SIGINT,  lambda *args : RUNNING.clear() )
 signal.signal( signal.SIGTERM, lambda *args : RUNNING.clear() )
 
-def watchdog( outdir, all=False, extras=False, root=UUID_ROOT, fileGen=video_utils_outfile):
+def watchdog( outdir, everything=False, extras=False, root=UUID_ROOT, fileGen=video_utils_outfile):
     """
     Main watchdog for disc monitoring/ripping
 
@@ -37,7 +44,7 @@ def watchdog( outdir, all=False, extras=False, root=UUID_ROOT, fileGen=video_uti
             files
 
     Keyword arguments:
-        all (bool) : If set, then all titles identified
+        everything (bool) : If set, then all titles identified
             for ripping will be ripped. By default, only the
             main feature will be ripped
         extras (bool) : If set, only 'extra' features will
@@ -58,22 +65,32 @@ def watchdog( outdir, all=False, extras=False, root=UUID_ROOT, fileGen=video_uti
     """
 
     log     = logging.getLogger( __name__ )
-    log.debug( f"{__name__} started" )
-    context = pyudev.Context()
-    monitor = pyudev.Monitor.from_netlink(context)
+    log.debug( "%s started", __name__ )
+
+    lastevent = {}
+    context   = pyudev.Context()
+    monitor   = pyudev.Monitor.from_netlink(context)
     monitor.filter_by(subsystem='block')
     while RUNNING.is_set():
-        device = monitor.poll(timeout=5.0)
-        if device is None: continue
-        if KEY not in device.properties: continue
-        dev  = device.properties[KEY]
+        device = monitor.poll(timeout=TIMEOUT)
+        if device is None:
+            continue
+        if KEY not in device.properties:
+            continue
 
-        Process( 
-            target = ripDisc,
-            args   = (dev, root, outdir, all, extras, fileGen),
+        dev   = device.properties[KEY]
+        t_new = time.monotonic()
+        t_old = lastevent.get( dev, -float('inf') )
+        if (t_new-t_old) < TIMEOUT:
+            log.debug( 'Another event for %s triggered before timeout %f', dev, TIMEOUT )
+            continue 
+        lastevent[dev] = t_new
+        Process(
+            target = rip_disc,
+            args   = (dev, root, outdir, everything, extras, fileGen),
         ).start()
 
-def ripDisc( dev, root, outdir, all, extras, fileGen ):
+def rip_disc( dev, root, outdir, everything, extras, fileGen ):
     """
     Rip a whole disc
 
@@ -94,19 +111,19 @@ def ripDisc( dev, root, outdir, all, extras, fileGen ):
     log = logging.getLogger(__name__)
 
     info = getTitleInfo( dev, root )
-    if info is None: 
-        log.error( f"No title information found/entered : {dev}" )
+    if info is None:
+        log.error( "No title information found/entered : %s", dev )
         return
 
-    for title, fpath in fileGen( outdir, info, all=all, extras=extras ):
-        ripTitle( f"dev:{dev}", title, fpath )
+    for title, fpath in fileGen( outdir, info, everything=everything, extras=extras ):
+        rip_title( f"dev:{dev}", title, fpath )
 
     try:
         os.system( f"eject {dev}" )
     except:
         pass
 
-def ripTitle( src, title, outfile ):
+def rip_title( src, title, outfile ):
     """
     Rip a given title from a disc
 
@@ -130,14 +147,14 @@ def ripTitle( src, title, outfile ):
 
     tmpdir = os.path.splitext( os.path.basename( outfile ) )[0]
     tmpdir = os.path.join( outdir, tmpdir )
-    log.debug( f"Creating temporary directory : '{tmpdir}'" )
+    log.debug( "Creating temporary directory : '%s'", tmpdir )
     os.makedirs( tmpdir, exist_ok=True )
 
-    baseLog = f"[{src} - {title}]"
-    log.info( f"{baseLog} Ripping track" )
-    proc = makeMKV('mkv', src, title, tmpdir, noscan=True, minlength=0)
+    baselog = f"[{src} - {title}]"
+    log.info( "%s Ripping track", baselog )
+    proc = makemkvcon('mkv', src, title, tmpdir, noscan=True, minlength=0)
     for line in iter(proc.stdout.readline, ''):
-        log.info( f"{baseLog} {line.rstrip()}" )
+        log.info( "%s %s", baselog, line.rstrip() )
     proc.communicate()
     files = [
         os.path.join(tmpdir, item) for item in os.listdir(tmpdir)
@@ -145,13 +162,15 @@ def ripTitle( src, title, outfile ):
 
     status = False
     if proc.returncode != 0:
-        for f in files: os.remove(f)
-        self.log.error( "Error ripping track '{title}' from '{src}'" )
+        for fname in files:
+            os.remove(fname)
+        log.error( "Error ripping track '%s' from '%s'", title, src )
     elif len(files) != 1:
         log.error( 'Too many output files!' )
-        for f in files: os.remove( f )
+        for fname in files:
+            os.remove( fname )
     else:
-        log.info( f"Renaming file '{files[0]}' ---> '{outfile}'" )
+        log.info( "Renaming file '%s' ---> '%s'", files[0], outfile )
         os.rename( files[0], outfile )
         status = True
 

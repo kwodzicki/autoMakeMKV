@@ -14,4 +14,4 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
     STREAM.setLevel( args.loglevel )
-    watchdog( args.outdir, all=args.all, extras=args.extras )
+    watchdog( args.outdir, everything=args.all, extras=args.extras )

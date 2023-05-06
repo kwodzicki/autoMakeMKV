@@ -1,3 +1,9 @@
+"""
+Lookup dict for information/codes from MakeMKV
+output
+
+"""
+
 AP = {
          '0' : 'Unkown',
          '1' : 'Type',

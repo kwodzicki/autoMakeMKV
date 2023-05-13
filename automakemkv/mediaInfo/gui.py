@@ -11,10 +11,10 @@ EXTRATYPES = [
     'interview', 'scene', 'short', 'trailer', 'other',
 ]
 
-MOVIETYPES  = ['edition']
-SERIESTYPES = ['']
-
-MEDIATYPES  = [
+MOVIETYPES   = ['edition']
+SERIESTYPES  = ['']
+CONTENTTYPES = ['', 'Movie', 'Series']
+MEDIATYPES   = [
     'DVD', 'Blu-Ray', '4K Blu-Ray (UHD)',
 ]
 
@@ -26,7 +26,7 @@ def main( discDev='/dev/sr0', **kwargs ):
 
     return mediaIDs.info
 
-class DiscMetadata( QtWidgets.QWidget ):
+class BaseMetadata( QtWidgets.QWidget ):
     """
     Widget for disc metadata
 
@@ -44,15 +44,6 @@ class DiscMetadata( QtWidgets.QWidget ):
         self.log = logging.getLogger( __name__ )
         layout = QtWidgets.QGridLayout()
 
-        layout.addWidget( QtWidgets.QLabel( 'Title :' ),         0, 0 )
-        layout.addWidget( QtWidgets.QLabel( 'Year :' ),          1, 0 )
-        layout.addWidget( QtWidgets.QLabel( 'Type :' ),          2, 0 )
-
-        layout.addWidget( QtWidgets.QLabel( 'TheMovieDB ID :' ), 0, 2 )
-        layout.addWidget( QtWidgets.QLabel( 'TheTVDB ID :' ),    1, 2 )
-        layout.addWidget( QtWidgets.QLabel( 'IMDb ID :' ),       2, 2 )
-        layout.addWidget( QtWidgets.QLabel( 'UPC :' ),           3, 2 )
-
         self.title    = QtWidgets.QLineEdit()
         self.year     = QtWidgets.QLineEdit()
         self.tmdb     = QtWidgets.QLineEdit()
@@ -60,46 +51,145 @@ class DiscMetadata( QtWidgets.QWidget ):
         self.imdb     = QtWidgets.QLineEdit()
         self.upc      = QtWidgets.QLineEdit()
 
-        self.isMovie  = QtWidgets.QRadioButton( 'Movie' )
-        self.isSeries = QtWidgets.QRadioButton( 'Series' )
 
-        self.media_type = QtWidgets.QComboBox()
-        self.media_type.addItems( [''] + MEDIATYPES )
-        
+        self.type     = QtWidgets.QComboBox( )
+        self.type.addItems( CONTENTTYPES )
+
         self.title.setPlaceholderText( 'Movie/Series Title' )
         self.year.setPlaceholderText(  'Movie Released / Series First Aired' )
-        self.tmdb.setPlaceholderText(  'Movie/Series ID' )
-        self.tvdb.setPlaceholderText(  'Movie/Series ID' )
-        self.imdb.setPlaceholderText(  'Movie/Series ID' )
+        self.tmdb.setPlaceholderText(  'TheMovieDb ID' )
+        self.tvdb.setPlaceholderText(  'TheTVDb ID' )
+        self.imdb.setPlaceholderText(  'IMDb ID' )
         self.upc.setPlaceholderText(   'Universal Product Code' )
 
-        layout.addWidget( self.title,     0, 1 )
-        layout.addWidget( self.year,      1, 1 )
+        layout.addWidget( self.title,     0, 0 )
+        layout.addWidget( self.year,      1, 0 )
 
         # Build wiget for the type of video (Movie/TV) 
         _layout  = QtWidgets.QHBoxLayout()
-        _layout.addWidget( self.isMovie )
-        _layout.addWidget( self.isSeries )
+        _layout.addWidget( QtWidgets.QLabel('Type : ') )
+        _layout.addWidget( self.type )
         video_type = QtWidgets.QWidget()
         video_type.setLayout( _layout )
 
+        layout.addWidget( video_type, 2, 0 )
+
+        layout.addWidget( self.tmdb,     0, 1 )
+        layout.addWidget( self.tvdb,     1, 1 )
+        layout.addWidget( self.imdb,     2, 1 )
+        layout.addWidget( self.upc,      3, 1 )
+        
+        self.setLayout( layout )
+
+    def connect_parent(self, parent):
+        """
+        Connect all fields to parent
+
+        Link all the entry fields to a parent object
+        so that when text in parent is changed, it is changed
+        in this object as well.
+
+        Idea is to use this method to link the 'title' metadata
+        fields to the 'disc' metadata fields. That way, if
+        information applies to entire disc (e.g., IMDb ID), then
+        that information will be updated for all titles.
+
+        """
+
+        parent.title.textChanged.connect( self.title.setText )
+        parent.year.textChanged.connect( self.year.setText )
+        parent.tmdb.textChanged.connect( self.tmdb.setText )
+        parent.tvdb.textChanged.connect( self.tvdb.setText )
+        parent.imdb.textChanged.connect( self.imdb.setText )
+        parent.upc.textChanged.connect(  self.upc.setText  )
+        parent.type.currentIndexChanged.connect(
+            self.type.setCurrentIndex,
+        )
+ 
+    def isMovie(self):
+
+        return self.type.currentText() == 'Movie'
+
+    def isSeries(self):
+
+        return self.type.currentText() == 'Series'
+
+    def getInfo(self):
+        """
+        Return dict with info from entry boxes
+
+        Collect text from the various entry
+        fields into a dictionary. A check is
+        run to ensure that any required metadata
+        are entered before returning the data.
+        If data are missing, None is returned.
+
+        Arguments:
+            None.
+
+        Returns:
+            dict,None : If metadata contains
+                required information, a dict
+                is returned, else None.
+
+        """
+
+        self.log.debug( 'Getting base metadata from widget' )
+        return  {
+            'title'      : self.title.text(),
+            'year'       : self.year.text(),
+            'tmdb'       : self.tmdb.text(),
+            'tvdb'       : self.tvdb.text(),
+            'imdb'       : self.imdb.text(),
+            'upc'        : self.upc.text(),
+            'isMovie'    : self.isMovie(),
+            'isSeries'   : self.isSeries(),
+        }
+
+    def setInfo(self, info):
+
+        self.log.debug( 'Setting disc metadata fro widget' )
+        self.title.setText( info.get('title', '') )
+        self.year.setText(  info.get('year',  '') ) 
+        self.tmdb.setText(  info.get('tmdb',  '') ) 
+        self.tvdb.setText(  info.get('tvdb',  '') ) 
+        self.imdb.setText(  info.get('imdb',  '') )
+        self.upc.setText(   info.get('upc',   '') )
+
+        if info.get('isMovie', False):
+            self.type.setCurrentText('Movie')
+        elif info.get('isSeries', False):
+            self.type.setCurrentText('Series')
+
+
+class DiscMetadata( BaseMetadata ):
+    """
+    Widget for disc metadata
+
+    This widget is for entering metadata that
+    pertains to the entire disc such as 
+    Movie/Series name, database IDs 
+    (e.g. TMDb, TVDb, IMDb), and release/
+    first aired year.
+
+    """
+
+    def __init__(self, *args, **kwargs ):
+        super().__init__(*args, **kwargs)
+
+        self.log = logging.getLogger( __name__ )
+
         # Build wiget for the type of media (DVD/BluRay/etc.) 
+        self.media_type = QtWidgets.QComboBox()
+        self.media_type.addItems( [''] + MEDIATYPES )
+
         _layout  = QtWidgets.QGridLayout()
-        _layout.addWidget( QtWidgets.QLabel( 'Media Type :' ), 0, 0 )
+        _layout.addWidget( QtWidgets.QLabel( 'Media : ' ), 0, 0 )
         _layout.addWidget( self.media_type, 0, 1 )
         media_type = QtWidgets.QWidget()
         media_type.setLayout( _layout )
   
-        layout.addWidget( video_type, 2, 1 )
-
-        layout.addWidget( self.tmdb,     0, 3 )
-        layout.addWidget( self.tvdb,     1, 3 )
-        layout.addWidget( self.imdb,     2, 3 )
-        layout.addWidget( self.upc,      3, 3 )
-        
-        layout.addWidget( media_type, 3, 0, 1, 2)
-
-        self.setLayout( layout )
+        self.layout().addWidget( media_type, 3, 0)
 
     def getInfo(self):
         """
@@ -122,17 +212,8 @@ class DiscMetadata( QtWidgets.QWidget ):
         """
 
         self.log.debug( 'Getting disc metadata from widget' )
-        info = {
-            'title'      : self.title.text(),
-            'year'       : self.year.text(),
-            'tmdb'       : self.tmdb.text(),
-            'tvdb'       : self.tvdb.text(),
-            'imdb'       : self.imdb.text(),
-            'upc'        : self.upc.text(),
-            'isMovie'    : self.isMovie.isChecked(),
-            'isSeries'   : self.isSeries.isChecked(),
-            'media_type' : self.media_type.currentText(),
-        }
+        info = super().getInfo()
+        info['media_type'] = self.media_type.currentText()
 
         if checkInfo( self, info ):
             return info
@@ -141,21 +222,10 @@ class DiscMetadata( QtWidgets.QWidget ):
     def setInfo(self, info):
 
         self.log.debug( 'Setting disc metadata fro widget' )
-        self.title.setText( info.get('title', '') )
-        self.year.setText(  info.get('year',  '') ) 
-        self.tmdb.setText(  info.get('tmdb',  '') ) 
-        self.tvdb.setText(  info.get('tvdb',  '') ) 
-        self.imdb.setText(  info.get('imdb',  '') )
-        self.upc.setText(   info.get('upc',   '') )
-
+        super().setInfo(info)
         self.media_type.setCurrentText( info.get('media_type', '') )
 
-        if info.get('isMovie', False):
-            self.isMovie.setChecked(True)
-        elif info.get('isSeries', False):
-            self.isSeries.setChecked(True)
-
-class TitleMetadata( QtWidgets.QWidget ):
+class TitleMetadata( BaseMetadata ):
     """
     Widget for metadata about a title
 
@@ -169,7 +239,7 @@ class TitleMetadata( QtWidgets.QWidget ):
         super().__init__(*args, **kwargs)
 
         self.log = logging.getLogger( __name__ )
-        layout = QtWidgets.QGridLayout()
+        layout = self.layout()
 
         self.seasonLabel, self.season = (
             self.initSeriesWidget('Season', 'Season number')
@@ -181,12 +251,12 @@ class TitleMetadata( QtWidgets.QWidget ):
             self.initSeriesWidget('Title', 'Episode Title')
         )
 
-        layout.addWidget( self.seasonLabel,       0, 0 )
-        layout.addWidget( self.season,            0, 1 )
-        layout.addWidget( self.episodeLabel,      1, 0 )
-        layout.addWidget( self.episode,           1, 1 )
-        layout.addWidget( self.episodeTitleLabel, 2, 0 )
-        layout.addWidget( self.episodeTitle,      2, 1 )
+        layout.addWidget( self.seasonLabel,       10, 0 )
+        layout.addWidget( self.season,            10, 1 )
+        layout.addWidget( self.episodeLabel,      11, 0 )
+        layout.addWidget( self.episode,           11, 1 )
+        layout.addWidget( self.episodeTitleLabel, 12, 0 )
+        layout.addWidget( self.episodeTitle,      12, 1 )
 
         self.extraLabel = QtWidgets.QLabel('Extra')
         self.extra      = QtWidgets.QComboBox()
@@ -200,13 +270,15 @@ class TitleMetadata( QtWidgets.QWidget ):
         self.extraTitleLabel.setHidden( True )
         self.extraTitle.setHidden( True )
 
-        layout.addWidget( self.extraLabel,      3, 0)
-        layout.addWidget( self.extra,           3, 1)
-        layout.addWidget( self.extraTitleLabel, 4, 0)
-        layout.addWidget( self.extraTitle,      4, 1)
+        layout.addWidget( self.extraLabel,      13, 0)
+        layout.addWidget( self.extra,           13, 1)
+        layout.addWidget( self.extraTitleLabel, 14, 0)
+        layout.addWidget( self.extraTitle,      14, 1)
 
-        self.setLayout( layout )
-
+        self.type.currentIndexChanged.connect(
+            self.on_type_change,
+        )
+ 
     def getInfo( self ):
         """
         Get dict of title information
@@ -220,10 +292,13 @@ class TitleMetadata( QtWidgets.QWidget ):
         """
 
         self.log.debug( 'Getting title metadata from widget' )
-        info = {
-            'extra'      : self.extra.currentText(),
-            'extraTitle' : self.extraTitle.text(),
-        }
+        info = super().getInfo()
+        info.update( 
+            {
+                'extra'      : self.extra.currentText(),
+                'extraTitle' : self.extraTitle.text(),
+            }
+        )
         if not self.season.isHidden(): # If season LineEdit hidden, then is movie
             info.update(
                 {
@@ -233,6 +308,7 @@ class TitleMetadata( QtWidgets.QWidget ):
                 }
             )
 
+        print( info )
         return info
 
     def setInfo( self, info ):
@@ -253,6 +329,7 @@ class TitleMetadata( QtWidgets.QWidget ):
         """
 
         self.log.debug( 'setting title metadata for widget' )
+        super().setInfo( info )
         self.season.setText(       info.get('season',       '' ) )
         self.episode.setText(      info.get('episode',      '' ) )
         self.episodeTitle.setText( info.get('episodeTitle', '' ) )
@@ -314,48 +391,21 @@ class TitleMetadata( QtWidgets.QWidget ):
         self.extraTitleLabel.setHidden(   not hidden )
         self.extraTitle.setHidden(        not hidden )
 
-    def on_isMovie_change(self, selected):
-        """
-        Change title info dialog to movie attributes
+    def on_type_change(self, index):
 
-        Intended to be connect to the DiscMetadata
-        object's isMovie radio button so that when
-        a Movie is selected, the title attriubtes
-        for a movie are displayed
-
-        Arguments:
-            selected (bool) : Selected state of
-                the radio button
-
-        """
-
-        if not selected: return
-
-        self.toggle_series_info_hidden( True )
+        text = CONTENTTYPES[index]
         self.extra.clear()
-        self.extra.addItems( MOVIETYPES + EXTRATYPES )
+        if text == 'Movie':
+            self.toggle_series_info_hidden( True )
+            self.extra.addItems( MOVIETYPES )
+        elif text == 'Series':
+            self.toggle_series_info_hidden( False )
+            self.extra.addItems( SERIESTYPES )
+        else:
+            return
 
-    def on_isSeries_change(self, selected):
-        """
-        Change title info dialog to series attributes
-
-        Intended to be connect to the DiscMetadata
-        object's isSeries radio button so that when
-        a Series is selected, the title attriubtes
-        for a series are displayed
-
-        Arguments:
-            selected (bool) : Selected state of
-                the radio button
-
-        """
-
-        if not selected: return
-
-        self.toggle_series_info_hidden( False )
-        self.extra.clear()
-        self.extra.addItems( SERIESTYPES + EXTRATYPES )
-        
+        self.extra.addItems( EXTRATYPES )
+            
 class MainWidget( QtWidgets.QMainWindow ):
 
     default_title = 'Title'
@@ -376,7 +426,7 @@ class MainWidget( QtWidgets.QMainWindow ):
 
         self.titleTree = QtWidgets.QTreeWidget()
         self.titleTree.setHeaderLabels( ['Type', 'Description'] )
-        self.titleTree.setColumnWidth( 0, 150 )
+        self.titleTree.setColumnWidth( 0, 100 )
 
         self.infoBox  = QtWidgets.QTextEdit()
         self.msgs     = QtWidgets.QTextEdit()
@@ -394,12 +444,14 @@ class MainWidget( QtWidgets.QMainWindow ):
 
         self.discMetadata  = DiscMetadata()
         self.titleMetadata = TitleMetadata()
-        self.discMetadata.isMovie.toggled.connect(
-            self.titleMetadata.on_isMovie_change
-        )
-        self.discMetadata.isSeries.toggled.connect(
-            self.titleMetadata.on_isSeries_change
-        )
+        self.titleMetadata.connect_parent( self.discMetadata )
+
+        #self.discMetadata.isMovie.toggled.connect(
+        #    self.titleMetadata.on_isMovie_change
+        #)
+        #self.discMetadata.isSeries.toggled.connect(
+        #    self.titleMetadata.on_isSeries_change
+        #)
 
         layout = QtWidgets.QGridLayout()
         layout.setColumnStretch(0, 3)
@@ -477,11 +529,13 @@ class MainWidget( QtWidgets.QMainWindow ):
 
         """
 
-        print( 'ripping' if kwargs.get('rip', False) else 'skiprip' )
         self.log.debug( 'Saving data JSON' )
         info = self.discMetadata.getInfo()
-        if info is None: return 
+        if info is None:
+            self.log.debug( 'No disc metadata' )
+            return 
 
+        print( self.curTitle )
         if self.curTitle is not None:
             self.curTitle.info.update(
                 self.titleMetadata.getInfo()
@@ -497,11 +551,12 @@ class MainWidget( QtWidgets.QMainWindow ):
             titles.update( { titleObj.titleID : titleObj.info } )
 
         if len(titles) == 0:
-            print('No titles marked for ripping!')
+            self.log.info('No titles marked for ripping!')
             return
 
         info['titles'] = titles
 
+        print(info)
         confirm = QtWidgets.QMessageBox()
         res     = confirm.question(
                 self, '', 'Are you sure the information is correct?',

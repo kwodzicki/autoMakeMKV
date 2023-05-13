@@ -9,11 +9,55 @@ MEDIATYPE = {
     '720x480'   : 'DVD',
 }
 
-def add_media_type( db_root ):
+DISCMETAKEYS = [
+    'title',
+    'year',
+    'tmdb',
+    'tvdb',
+    'imdb',
+    'upc',
+    'isMovie',
+    'isSeries',
+]
+
+def add_disc_info_to_titles( db_root ):
+    """
+    Copy the disc metadata information to
+    all tracks that do not have such metadata
+
+    """
 
     for file in os.listdir( db_root ):
         if not file.endswith('.json'):
             continue
+        file = os.path.join( db_root, file )
+
+        with open(file, 'r') as iid:
+            data = json.load(iid)
+    
+        for info in data['titles'].values():
+            for key in DISCMETAKEYS:
+                if key in info:
+                    continue
+                info[key] = data.get(key, '')
+    
+        with open(file, 'w') as oid:
+            json.dump( data, oid, indent=4 )
+
+def add_media_type( db_root ):
+    """
+    Add the media_type attribute to database items
+    that do not have it.
+
+    Use the resolution of the video to determine what
+    the source media was.
+
+    """
+
+    for file in os.listdir( db_root ):
+        if not file.endswith('.json'):
+            continue
+        file = os.path.join( db_root, file )
         info_file = os.path.join(
             db_root,
             os.path.splitext(file)[0]+'.info.gz'

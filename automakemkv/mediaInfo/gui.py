@@ -14,6 +14,10 @@ EXTRATYPES = [
 MOVIETYPES  = ['edition']
 SERIESTYPES = ['']
 
+MEDIATYPES  = [
+    'DVD', 'Blu-Ray', '4K Blu-Ray (UHD)',
+]
+
 def main( discDev='/dev/sr0', **kwargs ):
 
     app = QtWidgets.QApplication(['MakeMKV MediaID'])
@@ -40,13 +44,14 @@ class DiscMetadata( QtWidgets.QWidget ):
         self.log = logging.getLogger( __name__ )
         layout = QtWidgets.QGridLayout()
 
-        layout.addWidget( QtWidgets.QLabel( 'Title' ),         0, 0 )
-        layout.addWidget( QtWidgets.QLabel( 'Year' ),          1, 0 )
+        layout.addWidget( QtWidgets.QLabel( 'Title :' ),         0, 0 )
+        layout.addWidget( QtWidgets.QLabel( 'Year :' ),          1, 0 )
+        layout.addWidget( QtWidgets.QLabel( 'Type :' ),          2, 0 )
 
-        layout.addWidget( QtWidgets.QLabel( 'TheMovieDB ID' ), 0, 2 )
-        layout.addWidget( QtWidgets.QLabel( 'TheTVDB ID' ),    1, 2 )
-        layout.addWidget( QtWidgets.QLabel( 'IMDb ID' ),       2, 2 )
-        layout.addWidget( QtWidgets.QLabel( 'UPC' ),           3, 2 )
+        layout.addWidget( QtWidgets.QLabel( 'TheMovieDB ID :' ), 0, 2 )
+        layout.addWidget( QtWidgets.QLabel( 'TheTVDB ID :' ),    1, 2 )
+        layout.addWidget( QtWidgets.QLabel( 'IMDb ID :' ),       2, 2 )
+        layout.addWidget( QtWidgets.QLabel( 'UPC :' ),           3, 2 )
 
         self.title    = QtWidgets.QLineEdit()
         self.year     = QtWidgets.QLineEdit()
@@ -58,6 +63,9 @@ class DiscMetadata( QtWidgets.QWidget ):
         self.isMovie  = QtWidgets.QRadioButton( 'Movie' )
         self.isSeries = QtWidgets.QRadioButton( 'Series' )
 
+        self.media_type = QtWidgets.QComboBox()
+        self.media_type.addItems( [''] + MEDIATYPES )
+        
         self.title.setPlaceholderText( 'Movie/Series Title' )
         self.year.setPlaceholderText(  'Movie Released / Series First Aired' )
         self.tmdb.setPlaceholderText(  'Movie/Series ID' )
@@ -65,15 +73,31 @@ class DiscMetadata( QtWidgets.QWidget ):
         self.imdb.setPlaceholderText(  'Movie/Series ID' )
         self.upc.setPlaceholderText(   'Universal Product Code' )
 
-        layout.addWidget( self.title,    0, 1 )
-        layout.addWidget( self.year,     1, 1 )
+        layout.addWidget( self.title,     0, 1 )
+        layout.addWidget( self.year,      1, 1 )
 
-        layout.addWidget( self.isMovie,  2, 0 )
-        layout.addWidget( self.isSeries, 2, 1 )
+        # Build wiget for the type of video (Movie/TV) 
+        _layout  = QtWidgets.QHBoxLayout()
+        _layout.addWidget( self.isMovie )
+        _layout.addWidget( self.isSeries )
+        video_type = QtWidgets.QWidget()
+        video_type.setLayout( _layout )
+
+        # Build wiget for the type of media (DVD/BluRay/etc.) 
+        _layout  = QtWidgets.QGridLayout()
+        _layout.addWidget( QtWidgets.QLabel( 'Media Type :' ), 0, 0 )
+        _layout.addWidget( self.media_type, 0, 1 )
+        media_type = QtWidgets.QWidget()
+        media_type.setLayout( _layout )
+  
+        layout.addWidget( video_type, 2, 1 )
+
         layout.addWidget( self.tmdb,     0, 3 )
         layout.addWidget( self.tvdb,     1, 3 )
         layout.addWidget( self.imdb,     2, 3 )
         layout.addWidget( self.upc,      3, 3 )
+        
+        layout.addWidget( media_type, 3, 0, 1, 2)
 
         self.setLayout( layout )
 
@@ -99,14 +123,15 @@ class DiscMetadata( QtWidgets.QWidget ):
 
         self.log.debug( 'Getting disc metadata from widget' )
         info = {
-            'title'    : self.title.text(),
-            'year'     : self.year.text(),
-            'tmdb'     : self.tmdb.text(),
-            'tvdb'     : self.tvdb.text(),
-            'imdb'     : self.imdb.text(),
-            'upc'      : self.upc.text(),
-            'isMovie'  : self.isMovie.isChecked(),
-            'isSeries' : self.isSeries.isChecked(),
+            'title'      : self.title.text(),
+            'year'       : self.year.text(),
+            'tmdb'       : self.tmdb.text(),
+            'tvdb'       : self.tvdb.text(),
+            'imdb'       : self.imdb.text(),
+            'upc'        : self.upc.text(),
+            'isMovie'    : self.isMovie.isChecked(),
+            'isSeries'   : self.isSeries.isChecked(),
+            'media_type' : self.media_type.currentText(),
         }
 
         if checkInfo( self, info ):
@@ -122,6 +147,8 @@ class DiscMetadata( QtWidgets.QWidget ):
         self.tvdb.setText(  info.get('tvdb',  '') ) 
         self.imdb.setText(  info.get('imdb',  '') )
         self.upc.setText(   info.get('upc',   '') )
+
+        self.media_type.setCurrentText( info.get('media_type', '') )
 
         if info.get('isMovie', False):
             self.isMovie.setChecked(True)

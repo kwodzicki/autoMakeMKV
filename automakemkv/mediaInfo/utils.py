@@ -19,6 +19,8 @@ def checkInfo( parent, info ):
         message = "Must set Movie/Series Title"
     elif info['year'] == '':
         message = "Must set Movie/Series release year"
+    elif info['media_type'] == '':
+        message = "Must set media type!"
 
     if message is None:
         return True

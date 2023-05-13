@@ -7,6 +7,7 @@ import logging
 import os
 import signal
 import time
+import subprocess
 from multiprocessing import Process
 from threading import Event
 
@@ -17,7 +18,8 @@ from .mediaInfo import getTitleInfo
 from .makemkv import makemkvcon
 from .utils import video_utils_outfile
 
-KEY = 'DEVNAME'
+KEY     = 'DEVNAME'
+CHANGE  = 'DISK_MEDIA_CHANGE'
 TIMEOUT = 10.0
 
 RUNNING = Event()
@@ -67,6 +69,7 @@ def watchdog( outdir, everything=False, extras=False, root=UUID_ROOT, fileGen=vi
     log     = logging.getLogger( __name__ )
     log.debug( "%s started", __name__ )
 
+    mounted   = {}
     lastevent = {}
     context   = pyudev.Context()
     monitor   = pyudev.Monitor.from_netlink(context)
@@ -75,20 +78,45 @@ def watchdog( outdir, everything=False, extras=False, root=UUID_ROOT, fileGen=vi
         device = monitor.poll(timeout=1.0)
         if device is None:
             continue
-        if KEY not in device.properties:
+
+        # Get value for KEY. If is None, then did not exist, so continue
+        dev = device.properties.get(KEY, None)
+        if dev is None:
             continue
 
-        dev   = device.properties[KEY]
-        t_new = time.monotonic()
-        t_old = lastevent.get( dev, -float('inf') )
-        if (t_new-t_old) < TIMEOUT:
-            log.debug( 'Another event for %s triggered before timeout %f', dev, TIMEOUT )
-            continue 
-        lastevent[dev] = t_new
+        # If we did NOT change an insert/eject event
+        if device.properties.get(CHANGE, None) is None:
+            log.debug( 'Caught event that was NOT insert/eject, ignoring' )
+            continue
+
+        # If def is NOT in mounted, initialize to False
+        if dev not in mounted:
+            mounted[dev] = is_mounted( dev )
+        else:
+            mounted[dev] = not mounted[dev]
+
+        if not mounted[dev]:
+            log.info( 'Device has been ejected : %s', dev )
+            continue
+
         Process(
             target = rip_disc,
             args   = (dev, root, outdir, everything, extras, fileGen),
         ).start()
+
+def is_mounted( dev ):
+    """
+    Check if disc is mounted
+
+    """
+
+    returncode = subprocess.run(
+        ['file', '-s', dev],
+        stdout = subprocess.DEVNULL,
+        stderr = subprocess.STDOUT,
+    ).returncode
+
+    return returncode == 0
 
 def rip_disc( dev, root, outdir, everything, extras, fileGen ):
     """

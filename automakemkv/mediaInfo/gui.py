@@ -214,10 +214,7 @@ class DiscMetadata( BaseMetadata ):
         self.log.debug( 'Getting disc metadata from widget' )
         info = super().getInfo()
         info['media_type'] = self.media_type.currentText()
-
-        if checkInfo( self, info ):
-            return info
-        return None
+        return info
 
     def setInfo(self, info):
 
@@ -308,7 +305,6 @@ class TitleMetadata( BaseMetadata ):
                 }
             )
 
-        print( info )
         return info
 
     def setInfo( self, info ):
@@ -530,12 +526,12 @@ class MainWidget( QtWidgets.QMainWindow ):
         """
 
         self.log.debug( 'Saving data JSON' )
+
         info = self.discMetadata.getInfo()
         if info is None:
             self.log.debug( 'No disc metadata' )
             return 
 
-        print( self.curTitle )
         if self.curTitle is not None:
             self.curTitle.info.update(
                 self.titleMetadata.getInfo()
@@ -548,21 +544,29 @@ class MainWidget( QtWidgets.QMainWindow ):
             if titleObj.checkState(0) == 0:
                 continue
 
+            if not checkInfo( self, titleObj.info ):
+                return
+
             titles.update( { titleObj.titleID : titleObj.info } )
 
         if len(titles) == 0:
             self.log.info('No titles marked for ripping!')
+            message = QtWidgets.QMessageBox()
+            res = message.warning(
+                self, 
+                'No titles selected',
+                'No titles have been selected for ripping. Please select some titles and try again',
+            )
             return
 
         info['titles'] = titles
 
-        print(info)
-        confirm = QtWidgets.QMessageBox()
-        res     = confirm.question(
+        message = QtWidgets.QMessageBox()
+        res     = message.question(
                 self, '', 'Are you sure the information is correct?',
-                confirm.Yes | confirm.No
+                message.Yes | message.No
         )
-        if res == confirm.Yes:
+        if res == message.Yes:
             saveData(info, discID=self.discID, replace=True)
             self.info = info if kwargs.get('rip', False) else 'skiprip'
             self.close()
@@ -597,6 +601,12 @@ class MainWidget( QtWidgets.QMainWindow ):
                 self.titleMetadata.getInfo()
             )
         self.curTitle = obj                                         # Set curTitle title actual currently selected title
+        for key, val in self.discMetadata.getInfo().items():
+            if (val == ''):
+                continue
+            if (key not in obj.info) or (obj.info[key] == ''):
+                obj.info[key] = val
+             
         self.titleMetadata.setInfo( obj.info )                      # Update the titleMetadata pane with information from actual current title
 
     def buildTitleTree( self, info=None ):
@@ -625,15 +635,11 @@ class MainWidget( QtWidgets.QMainWindow ):
                 title.setCheckState(0, 2)
             else:
                 keys = ['Source Title Id', 'Source FileName', 'Segments Map']
-                title.info = {
-                        key : titleInfo.get(key, '') for key in keys
-                }
+                title.info = self.titleMetadata.getInfo()
+                title.info.update(
+                    {key : titleInfo.get(key, '') for key in keys}
+                )
                     
-                #print( titleInfo )
-                #title.info = {
-                #    'Source Title Id' : titleInfo['Source Title Id'],
-                #    'Segments Map'    : titleInfo['Segments Map'],    
-                #}
             # Used to update old files to contain the Segments Map
             #if 'Segments Map' not in title.info:
             #    title.info['Segments Map'] = titleInfo['Segments Map']

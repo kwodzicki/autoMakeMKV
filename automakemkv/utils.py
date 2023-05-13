@@ -174,7 +174,7 @@ def video_utils_movie( outdir, info, ext, everything, extras, **kwargs ):
     """
 
     for tid, title in info['titles'].items():
-        fpath = [ video_utils_dbkey(info), '' ]
+        fpath = [ video_utils_dbkey(title), '' ]
         # If extraTitle is NOT empty, then title is an extra
         if title['extraTitle'] != '':
             # If neither all nor extras is set, then we aren't ripping extras
@@ -216,7 +216,7 @@ def video_utils_series( outdir, info, ext, *args, **kwargs ):
         if title['extra'] == '':
             season  = int(title['season'] )
             episode = int(title['episode'])
-            fpath   = [ video_utils_dbkey( info ), f"S{season:02d}E{episode:02d}" ]
+            fpath   = [ video_utils_dbkey( title ), f"S{season:02d}E{episode:02d}" ]
         else:
             continue
 

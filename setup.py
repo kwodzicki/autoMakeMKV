@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-from distutils.core import convert_path
+from distutils.util import convert_path
 from setuptools import setup, find_packages
 
 NAME  = "automakemkv"
@@ -24,6 +24,6 @@ if __name__ == "__main__":
         packages             = find_packages(),
         include_package_data = True,
         install_requires     = [ 'PyQt5', 'pyudev' ],
-        scripts              = ['bin/autoMakeMKV'],
+        scripts              = ['bin/autoMakeMKV', 'bin/autoMakeMKV_gui'],
         zip_safe             = False
     )

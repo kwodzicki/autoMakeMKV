@@ -18,7 +18,7 @@ from .makemkv import makemkvcon
 from .utils import video_utils_outfile
 
 KEY = 'DEVNAME'
-TIMEOUT = 5.0
+TIMEOUT = 10.0
 
 RUNNING = Event()
 RUNNING.set()
@@ -72,7 +72,7 @@ def watchdog( outdir, everything=False, extras=False, root=UUID_ROOT, fileGen=vi
     monitor   = pyudev.Monitor.from_netlink(context)
     monitor.filter_by(subsystem='block')
     while RUNNING.is_set():
-        device = monitor.poll(timeout=TIMEOUT)
+        device = monitor.poll(timeout=1.0)
         if device is None:
             continue
         if KEY not in device.properties:
@@ -115,8 +115,11 @@ def rip_disc( dev, root, outdir, everything, extras, fileGen ):
         log.error( "No title information found/entered : %s", dev )
         return
 
-    for title, fpath in fileGen( outdir, info, everything=everything, extras=extras ):
-        rip_title( f"dev:{dev}", title, fpath )
+    if info != 'skiprip':
+        for title, fpath in fileGen(outdir, info, everything=everything, extras=extras):
+            rip_title( f"dev:{dev}", title, fpath )
+    else:
+        log.info( "Just saving metadata, not ripping : %s", dev )
 
     try:
         os.system( f"eject {dev}" )

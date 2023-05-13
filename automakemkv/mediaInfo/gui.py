@@ -351,11 +351,18 @@ class MainWidget( QtWidgets.QMainWindow ):
         self.titleTree.setHeaderLabels( ['Type', 'Description'] )
         self.titleTree.setColumnWidth( 0, 150 )
 
-        self.infoBox = QtWidgets.QTextEdit()
-        self.msgs    = QtWidgets.QTextEdit()
-        self.button  = QtWidgets.QPushButton( 'Save' )
-        self.button.clicked.connect( self.save )
-        self.button.setEnabled( False )
+        self.infoBox  = QtWidgets.QTextEdit()
+        self.msgs     = QtWidgets.QTextEdit()
+        self.save_but = QtWidgets.QPushButton( 'Save && Eject' )
+        self.rip_but  = QtWidgets.QPushButton( 'Save && Rip' )
+        self.save_but.clicked.connect( self.save )
+        self.save_but.setEnabled( False )
+
+        self.rip_but.clicked.connect(
+            lambda *args, **kwargs : self.save(*args, rip=True, **kwargs)
+        )
+        self.rip_but.setEnabled( False )
+
         self.msgs.setReadOnly(True)
 
         self.discMetadata  = DiscMetadata()
@@ -375,7 +382,8 @@ class MainWidget( QtWidgets.QMainWindow ):
         layout.addWidget( self.infoBox,       1, 1, 1, 1 )
         layout.addWidget( self.titleMetadata, 2, 1, 1, 1 )
         layout.addWidget( self.msgs,          3, 0, 1, 2 )
-        layout.addWidget( self.button,        4, 0, 1, 2 )
+        layout.addWidget( self.save_but,      4, 0, 1, 2 )
+        layout.addWidget( self.rip_but,       5, 0, 1, 2 )
 
         central = QtWidgets.QWidget()
         central.setLayout( layout )
@@ -442,6 +450,7 @@ class MainWidget( QtWidgets.QMainWindow ):
 
         """
 
+        print( 'ripping' if kwargs.get('rip', False) else 'skiprip' )
         self.log.debug( 'Saving data JSON' )
         info = self.discMetadata.getInfo()
         if info is None: return 
@@ -473,7 +482,7 @@ class MainWidget( QtWidgets.QMainWindow ):
         )
         if res == confirm.Yes:
             saveData(info, discID=self.discID, replace=True)
-            self.info = info
+            self.info = info if kwargs.get('rip', False) else 'skiprip'
             self.close()
 
     def selectTitle( self, obj, col ):
@@ -507,7 +516,6 @@ class MainWidget( QtWidgets.QMainWindow ):
             )
         self.curTitle = obj                                         # Set curTitle title actual currently selected title
         self.titleMetadata.setInfo( obj.info )                      # Update the titleMetadata pane with information from actual current title
-
 
     def buildTitleTree( self, info=None ):
 
@@ -561,4 +569,5 @@ class MainWidget( QtWidgets.QMainWindow ):
                 child.setText( 1, streamInfo['Tree Info'] )
 
         self.titleTree.currentItemChanged.connect( self.selectTitle )           # Run given method one object in QTreeWidget is clicked
-        self.button.setEnabled( True )  # Enable 'Apply' Button after the tree is populated
+        self.save_but.setEnabled( True )  # Enable 'Apply' Button after the tree is populated
+        self.rip_but.setEnabled( True )  # Enable 'Apply' Button after the tree is populated

@@ -41,6 +41,20 @@ def watchdog( outdir, everything=False, extras=False, root=UUID_ROOT, fileGen=vi
     After information is obtained, a rip of the
     requested/flagged tracks will start.
 
+    The logic for disc mounting is a bit obtuse, so will try to explain.
+    When the disc is initially inserted, it should trigger an event where
+    the CHANGE property is set. As the dev should NOT be in mounted list,
+    we add it to the mounting list. The next event for that dev is the event
+    that the disc is fully mounted. This will NOT have the CHANGE property.
+    As the disc is still in the mounting list at this point, will NOT enter
+    the if-statement there and will remove dev from mounting list, add dev
+    to mounted list, and then run the ripping process.
+
+    On future calls without the CHANGE property, the dev will NOT be in
+    the mounting list, so we will just skip them. For an event WITH the
+    CHANGE property, since the dev IS in the mounted list, we remove it
+    from the mounted list and log information that it has been ejected.
+
     Arguments:
         outdir (str) : Top-level directory for ripping
             files
@@ -69,7 +83,8 @@ def watchdog( outdir, everything=False, extras=False, root=UUID_ROOT, fileGen=vi
     log     = logging.getLogger( __name__ )
     log.debug( "%s started", __name__ )
 
-    mounted   = {}
+    mounting  = []
+    mounted   = []
     lastevent = {}
     context   = pyudev.Context()
     monitor   = pyudev.Monitor.from_netlink(context)
@@ -86,23 +101,25 @@ def watchdog( outdir, everything=False, extras=False, root=UUID_ROOT, fileGen=vi
 
         # If we did NOT change an insert/eject event
         if device.properties.get(CHANGE, None) is None:
-            log.debug( 'Caught event that was NOT insert/eject, ignoring' )
+            if dev not in mounting:
+                log.debug( 'Caught event that was NOT insert/eject, ignoring : %s', dev )
+                continue
+            log.debug('Finished mounting : %s', dev )
+            mounting.remove( dev )
+            mounted.append( dev )
+            Process(
+                target = rip_disc,
+                args   = (dev, root, outdir, everything, extras, fileGen),
+            ).start()
             continue
 
         # If def is NOT in mounted, initialize to False
         if dev not in mounted:
-            mounted[dev] = is_mounted( dev )
+            log.info( 'Device is mounting : %s', dev )
+            mounting.append( dev )
         else:
-            mounted[dev] = not mounted[dev]
-
-        if not mounted[dev]:
+            mounted.remove(dev)
             log.info( 'Device has been ejected : %s', dev )
-            continue
-
-        Process(
-            target = rip_disc,
-            args   = (dev, root, outdir, everything, extras, fileGen),
-        ).start()
 
 def is_mounted( dev ):
     """

@@ -49,8 +49,6 @@ class BaseMetadata( QtWidgets.QWidget ):
         self.tmdb     = QtWidgets.QLineEdit()
         self.tvdb     = QtWidgets.QLineEdit()
         self.imdb     = QtWidgets.QLineEdit()
-        self.upc      = QtWidgets.QLineEdit()
-
 
         self.type     = QtWidgets.QComboBox( )
         self.type.addItems( CONTENTTYPES )
@@ -60,7 +58,6 @@ class BaseMetadata( QtWidgets.QWidget ):
         self.tmdb.setPlaceholderText(  'TheMovieDb ID' )
         self.tvdb.setPlaceholderText(  'TheTVDb ID' )
         self.imdb.setPlaceholderText(  'IMDb ID' )
-        self.upc.setPlaceholderText(   'Universal Product Code' )
 
         layout.addWidget( self.title,     0, 0 )
         layout.addWidget( self.year,      1, 0 )
@@ -77,7 +74,6 @@ class BaseMetadata( QtWidgets.QWidget ):
         layout.addWidget( self.tmdb,     0, 1 )
         layout.addWidget( self.tvdb,     1, 1 )
         layout.addWidget( self.imdb,     2, 1 )
-        layout.addWidget( self.upc,      3, 1 )
         
         self.setLayout( layout )
 
@@ -101,7 +97,6 @@ class BaseMetadata( QtWidgets.QWidget ):
         parent.tmdb.textChanged.connect( self.tmdb.setText )
         parent.tvdb.textChanged.connect( self.tvdb.setText )
         parent.imdb.textChanged.connect( self.imdb.setText )
-        parent.upc.textChanged.connect(  self.upc.setText  )
         parent.type.currentIndexChanged.connect(
             self.type.setCurrentIndex,
         )
@@ -141,7 +136,6 @@ class BaseMetadata( QtWidgets.QWidget ):
             'tmdb'       : self.tmdb.text(),
             'tvdb'       : self.tvdb.text(),
             'imdb'       : self.imdb.text(),
-            'upc'        : self.upc.text(),
             'isMovie'    : self.isMovie(),
             'isSeries'   : self.isSeries(),
         }
@@ -154,7 +148,6 @@ class BaseMetadata( QtWidgets.QWidget ):
         self.tmdb.setText(  info.get('tmdb',  '') ) 
         self.tvdb.setText(  info.get('tvdb',  '') ) 
         self.imdb.setText(  info.get('imdb',  '') )
-        self.upc.setText(   info.get('upc',   '') )
 
         if info.get('isMovie', False):
             self.type.setCurrentText('Movie')
@@ -179,6 +172,10 @@ class DiscMetadata( BaseMetadata ):
 
         self.log = logging.getLogger( __name__ )
 
+        layout   = self.layout() 
+        self.upc = QtWidgets.QLineEdit()
+        self.upc.setPlaceholderText( 'Universal Product Code' )
+
         # Build wiget for the type of media (DVD/BluRay/etc.) 
         self.media_type = QtWidgets.QComboBox()
         self.media_type.addItems( [''] + MEDIATYPES )
@@ -188,8 +185,9 @@ class DiscMetadata( BaseMetadata ):
         _layout.addWidget( self.media_type, 0, 1 )
         media_type = QtWidgets.QWidget()
         media_type.setLayout( _layout )
-  
-        self.layout().addWidget( media_type, 3, 0)
+        
+        layout.addWidget( media_type, 3, 0)
+        layout.addWidget( self.upc,      3, 1 )
 
     def getInfo(self):
         """
@@ -214,12 +212,15 @@ class DiscMetadata( BaseMetadata ):
         self.log.debug( 'Getting disc metadata from widget' )
         info = super().getInfo()
         info['media_type'] = self.media_type.currentText()
+        info['upc'       ] = self.upc.text()
+
         return info
 
     def setInfo(self, info):
 
         self.log.debug( 'Setting disc metadata fro widget' )
         super().setInfo(info)
+        self.upc.setText( info.get('upc',   '') )
         self.media_type.setCurrentText( info.get('media_type', '') )
 
 class TitleMetadata( BaseMetadata ):

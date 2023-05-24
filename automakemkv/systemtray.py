@@ -1,18 +1,26 @@
 from PyQt5.QtWidgets import (
     QApplication,
     QSystemTrayIcon,
+    QFileDialog,
+    QWidget,
     QMessageBox,
+    QLabel,
+    QLineEdit,
+    QPushButton,
     QMenu,
     QAction,
     QStyle,
+    QVBoxLayout,
+    QHBoxLayout,
 )
 
 from PyQt5.QtGui import QIcon
 
-
-
-
 class SystemTray( QSystemTrayIcon ):
+    """
+    System tray class
+
+    """
 
     def __init__(self, app):
         icon = (
@@ -24,8 +32,7 @@ class SystemTray( QSystemTrayIcon ):
         )
         super().__init__(icon, app)
 
-        self.setVisible(True) 
-
+        self._settingsInfo = None
         self._app  = app
         self._menu = QMenu()
 
@@ -44,10 +51,12 @@ class SystemTray( QSystemTrayIcon ):
         self._menu.addAction( self._quit )
 
         self.setContextMenu( self._menu )
+        self.setVisible(True) 
 
     def settings(self, *args, **kwargs):
 
         print( 'opening settings' )
+        self._settingsInfo = SettingsWidget()
 
     def quit(self, *args, **kwargs):
         """Display quit confirm dialog"""
@@ -60,6 +69,49 @@ class SystemTray( QSystemTrayIcon ):
         res = msg.exec_()
         if res == QMessageBox.Yes:
             self._app.quit()
+
+class SettingsWidget( QWidget ):
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        self.database = PathSelector('Database Location:')
+        self.output   = PathSelector('Output Location:')
+
+        layout = QVBoxLayout()
+        layout.addWidget(self.database)
+        layout.addWidget(self.output)
+        
+        self.setLayout(layout)
+        self.show()
+
+class PathSelector(QWidget):
+
+    def __init__(self, label, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        self.path        = None
+
+        self.path_text   = QLineEdit()
+        self.path_button = QPushButton('Select Path')
+        self.path_button.clicked.connect( self.path_select )
+
+        layout = QHBoxLayout()
+        layout.addWidget(self.path_text) 
+        layout.addWidget(self.path_button) 
+        widget = QWidget()
+        widget.setLayout(layout)
+
+        layout = QVBoxLayout()
+        layout.addWidget(QLabel(label))
+        layout.addWidget(widget)
+
+        self.setLayout(layout)
+
+    def path_select(self, *args, **kwargs):
+
+        self.path = QFileDialog.getExistingDirectory(self, 'Select Folder')
+        print(self.path)
 
 if __name__ == "__main__":
     import sys

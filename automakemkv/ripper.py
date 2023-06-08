@@ -9,7 +9,7 @@ import signal
 import time
 import subprocess
 from multiprocessing import Process
-from threading import Event
+from threading import Thread, Event
 
 import pyudev
 
@@ -28,7 +28,7 @@ RUNNING.set()
 signal.signal( signal.SIGINT,  lambda *args : RUNNING.clear() )
 signal.signal( signal.SIGTERM, lambda *args : RUNNING.clear() )
 
-def watchdog( outdir, everything=False, extras=False, root=UUID_ROOT, fileGen=video_utils_outfile):
+class RipperWatchdog(Thread):
     """
     Main watchdog for disc monitoring/ripping
 
@@ -55,71 +55,97 @@ def watchdog( outdir, everything=False, extras=False, root=UUID_ROOT, fileGen=vi
     CHANGE property, since the dev IS in the mounted list, we remove it
     from the mounted list and log information that it has been ejected.
 
-    Arguments:
-        outdir (str) : Top-level directory for ripping
-            files
-
-    Keyword arguments:
-        everything (bool) : If set, then all titles identified
-            for ripping will be ripped. By default, only the
-            main feature will be ripped
-        extras (bool) : If set, only 'extra' features will
-            be ripped along with the main title(s). Main
-            title(s) include Theatrical/Extended/etc. 
-            versions for movies, and episodes for series.
-        root (str) : Location of the 'by-uuid' directory
-            where discs are mounted. This is used to
-            get the unique ID of the disc.
-        fileGen (func) : Function to use to generate
-            output file names based on information
-            from the database. This function must
-            accept (outdir, info, extras=bool), where info is
-            a dictionary of data loaded from the
-            disc database, and extras specifies if
-            extras should be ripped.
-
     """
 
-    log     = logging.getLogger( __name__ )
-    log.debug( "%s started", __name__ )
+    def __init__(self, outdir, everything=False, extras=False, root=UUID_ROOT, fileGen=video_utils_outfile, **kwargs):
+        """
+        Arguments:
+            outdir (str) : Top-level directory for ripping
+                files
+    
+        Keyword arguments:
+            everything (bool) : If set, then all titles identified
+                for ripping will be ripped. By default, only the
+                main feature will be ripped
+            extras (bool) : If set, only 'extra' features will
+                be ripped along with the main title(s). Main
+                title(s) include Theatrical/Extended/etc. 
+                versions for movies, and episodes for series.
+            root (str) : Location of the 'by-uuid' directory
+                where discs are mounted. This is used to
+                get the unique ID of the disc.
+            fileGen (func) : Function to use to generate
+                output file names based on information
+                from the database. This function must
+                accept (outdir, info, extras=bool), where info is
+                a dictionary of data loaded from the
+                disc database, and extras specifies if
+                extras should be ripped.
 
-    mounting  = []
-    mounted   = []
-    lastevent = {}
-    context   = pyudev.Context()
-    monitor   = pyudev.Monitor.from_netlink(context)
-    monitor.filter_by(subsystem='block')
-    while RUNNING.is_set():
-        device = monitor.poll(timeout=1.0)
-        if device is None:
-            continue
+        """
 
-        # Get value for KEY. If is None, then did not exist, so continue
-        dev = device.properties.get(KEY, None)
-        if dev is None:
-            continue
+        super().__init__() 
+        self.__log     = logging.getLogger( __name__ )
+        self.__log.debug( "%s started", __name__ )
+    
+        self._outdir = None
 
-        # If we did NOT change an insert/eject event
-        if device.properties.get(CHANGE, None) is None:
-            if dev not in mounting:
-                log.debug( 'Caught event that was NOT insert/eject, ignoring : %s', dev )
+        self.outdir     = outdir
+        self.everything = everything
+        self.extras     = extras
+        self.root       = root
+        self.fileGen    = fileGen
+
+        self._mounting  = []
+        self._mounted   = []
+        self._context   = pyudev.Context()
+        self._monitor   = pyudev.Monitor.from_netlink(self._context)
+        self._monitor.filter_by(subsystem='block')
+
+    @property
+    def outdir(self):
+        return self._outdir
+    @outdir.setter
+    def outdir(self, val):
+        os.makedirs(val, exist_ok=True)
+        self.__log.info('Output directory set to : %s', val)
+        self._outdir = val
+
+    def run(self):
+
+        self.__log.info('Watchdog thread started')
+        while RUNNING.is_set():
+            device = self._monitor.poll(timeout=1.0)
+            if device is None:
                 continue
-            log.debug('Finished mounting : %s', dev )
-            mounting.remove( dev )
-            mounted.append( dev )
-            Process(
-                target = rip_disc,
-                args   = (dev, root, outdir, everything, extras, fileGen),
-            ).start()
-            continue
 
-        # If def is NOT in mounted, initialize to False
-        if dev not in mounted:
-            log.info( 'Device is mounting : %s', dev )
-            mounting.append( dev )
-        else:
-            mounted.remove(dev)
-            log.info( 'Device has been ejected : %s', dev )
+            # Get value for KEY. If is None, then did not exist, so continue
+            dev = device.properties.get(KEY, None)
+            if dev is None:
+                continue
+
+            # If we did NOT change an insert/eject event
+            if device.properties.get(CHANGE, None) is None:
+                if dev not in self._mounting:
+                    self.__log.debug( 'Caught event that was NOT insert/eject, ignoring : %s', dev )
+                    continue
+                self.__log.debug('Finished mounting : %s', dev )
+                self._mounting.remove( dev )
+                self._mounted.append( dev )
+                Process(
+                    target = rip_disc,
+                    args   = (dev, self.root, self.outdir, self.everything, self.extras, self.fileGen),
+                ).start()
+                continue
+
+            # If def is NOT in mounted, initialize to False
+            if dev not in self._mounted:
+                self.__log.info( 'Device is mounting : %s', dev )
+                self._mounting.append( dev )
+            else:
+                self._mounted.remove(dev)
+                self.__log.info( 'Device has been ejected : %s', dev )
+        self.__log.info('Watchdog thread dead')
 
 def is_mounted( dev ):
     """

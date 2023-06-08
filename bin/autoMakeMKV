@@ -2,7 +2,7 @@
 import argparse
 
 from automakemkv import STREAM
-from automakemkv.ripper import watchdog 
+from automakemkv.ripper import RipperWatchdog 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -14,4 +14,6 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
     STREAM.setLevel( args.loglevel )
-    watchdog( args.outdir, everything=args.all, extras=args.extras )
+    inst = RipperWatchdog( args.outdir, everything=args.all, extras=args.extras )
+    inst.start()
+    inst.join()

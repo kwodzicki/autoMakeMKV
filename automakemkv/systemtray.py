@@ -1,3 +1,7 @@
+import logging
+import os
+import json
+
 from PyQt5.QtWidgets import (
     QApplication,
     QSystemTrayIcon,
@@ -13,10 +17,12 @@ from PyQt5.QtWidgets import (
     QVBoxLayout,
     QHBoxLayout,
 )
-
 from PyQt5.QtGui import QIcon
 
-class SystemTray( QSystemTrayIcon ):
+from . import HOMEDIR, DBDIR, SETTINGS_FILE
+from .ripper import RipperWatchdog, RUNNING
+
+class SystemTray(QSystemTrayIcon):
     """
     System tray class
 
@@ -32,6 +38,7 @@ class SystemTray( QSystemTrayIcon ):
         )
         super().__init__(icon, app)
 
+        self.__log = logging.getLogger(__name__)
         self._settingsInfo = None
         self._app  = app
         self._menu = QMenu()
@@ -53,9 +60,13 @@ class SystemTray( QSystemTrayIcon ):
         self.setContextMenu( self._menu )
         self.setVisible(True) 
 
+        settings = load_settings()
+        self.ripper = RipperWatchdog(**settings)
+        self.ripper.start()
+
     def settings(self, *args, **kwargs):
 
-        print( 'opening settings' )
+        self.__log.debug( 'opening settings' )
         self._settingsInfo = SettingsWidget()
 
     def quit(self, *args, **kwargs):
@@ -68,6 +79,7 @@ class SystemTray( QSystemTrayIcon ):
         msg.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
         res = msg.exec_()
         if res == QMessageBox.Yes:
+            RUNNING.clear()
             self._app.quit()
 
 class SettingsWidget( QWidget ):
@@ -111,8 +123,32 @@ class PathSelector(QWidget):
     def path_select(self, *args, **kwargs):
 
         self.path = QFileDialog.getExistingDirectory(self, 'Select Folder')
-        print(self.path)
+        self.__log.info(self.path)
 
+def load_settings():
+
+    if not os.path.isfile(SETTINGS_FILE):
+        settings = {
+            'dbdir'  : DBDIR,
+            'outdir' : os.path.join(HOMEDIR,'Videos'),
+        }
+        save_settings(settings)
+        return settings
+
+    logging.getLogger(__name__).debug(
+        'Loading settings from %s', SETTINGS_FILE,
+    )
+    with open(SETTINGS_FILE, 'r') as fid:
+        return json.load(fid)
+
+def save_settings(settings):
+
+    logging.getLogger(__name__).debug(
+        'Saving settings to %s', SETTINGS_FILE,
+    )
+    with open(SETTINGS_FILE, 'w') as fid:
+        json.dump(settings, fid)
+     
 if __name__ == "__main__":
     import sys
     app = QApplication( sys.argv )

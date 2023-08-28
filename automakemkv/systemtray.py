@@ -7,7 +7,10 @@ from PyQt5.QtWidgets import (
     QSystemTrayIcon,
     QFileDialog,
     QWidget,
+    QDialog,
+    QDialogButtonBox,
     QMessageBox,
+    QRadioButton,
     QLabel,
     QLineEdit,
     QPushButton,
@@ -49,7 +52,7 @@ class SystemTray(QSystemTrayIcon):
 
         self._menu.addSeparator()
         self._settings = QAction( 'Settings' )
-        self._settings.triggered.connect( self.settings )
+        self._settings.triggered.connect( self.settings_widget )
         self._menu.addAction( self._settings )
     
         self._menu.addSeparator() 
@@ -64,11 +67,15 @@ class SystemTray(QSystemTrayIcon):
         self.ripper = RipperWatchdog(**settings)
         self.ripper.start()
 
-    def settings(self, *args, **kwargs):
+    def settings_widget(self, *args, **kwargs):
 
         self.__log.debug( 'opening settings' )
-        self._settingsInfo = SettingsWidget()
-
+        settings_widget = SettingsWidget()
+        if settings_widget.exec_():
+            self.ripper.set_settings(
+                **settings_widget.get_settings(),
+            )
+        
     def quit(self, *args, **kwargs):
         """Display quit confirm dialog"""
 
@@ -82,26 +89,68 @@ class SystemTray(QSystemTrayIcon):
             RUNNING.clear()
             self._app.quit()
 
-class SettingsWidget( QWidget ):
+class SettingsWidget( QDialog ):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
-        self.database = PathSelector('Database Location:')
-        self.output   = PathSelector('Output Location:')
+        self.dbdir      = PathSelector('Database Location:')
+        self.outdir     = PathSelector('Output Location:')
+
+        radio_layout    = QVBoxLayout()
+        self.features   = QRadioButton("Only Features")
+        self.extras     = QRadioButton("Only Extras")
+        self.everything = QRadioButton("All Titles")
+        radio_layout.addWidget(self.features)
+        radio_layout.addWidget(self.extras)
+        radio_layout.addWidget(self.everything)
+        radio_widget    = QWidget()
+        radio_widget.setLayout(radio_layout)
+
+        self.set_settings()
+
+        buttons    = QDialogButtonBox.Save | QDialogButtonBox.Cancel
+        button_box = QDialogButtonBox(buttons) 
+        button_box.accepted.connect(self.accept)
+        button_box.rejected.connect(self.reject)
 
         layout = QVBoxLayout()
-        layout.addWidget(self.database)
-        layout.addWidget(self.output)
-        
+        layout.addWidget(self.dbdir)
+        layout.addWidget(self.outdir)
+        layout.addWidget(radio_widget)
+        layout.addWidget(button_box) 
         self.setLayout(layout)
-        self.show()
+
+    def set_settings(self):
+
+        settings = load_settings()
+        self.features.setChecked(True)
+        if 'dbdir' in settings:
+            self.dbdir.setText(settings['dbdir'])
+        if 'outdir' in settings:
+            self.outdir.setText(settings['outdir'])
+        if 'everything' in settings:
+            self.everything.setChecked(settings['everything'])
+        if 'extras' in settings:
+            self.extras.setChecked(settings['extras'])
+
+    def get_settings(self):
+
+        settings = {
+            'dbdir'      : self.dbdir.getText(),
+            'outdir'     : self.outdir.getText(),
+            'extras'     : self.extras.isChecked(),
+            'everything' : self.everything.isChecked(),
+        }
+        save_settings(settings)
+        return settings
 
 class PathSelector(QWidget):
 
     def __init__(self, label, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
+        self.__log       = logging.getLogger(__name__)
         self.path        = None
 
         self.path_text   = QLineEdit()
@@ -120,17 +169,29 @@ class PathSelector(QWidget):
 
         self.setLayout(layout)
 
+    def setText(self, var):
+
+        self.path_text.setText(var)
+
+    def getText(self):
+
+        return self.path_text.text()
+
     def path_select(self, *args, **kwargs):
 
-        self.path = QFileDialog.getExistingDirectory(self, 'Select Folder')
-        self.__log.info(self.path)
+        path = QFileDialog.getExistingDirectory(self, 'Select Folder')
+        if path != '' and os.path.isdir(path):
+            self.setText(path)
+            self.__log.info(path)
 
 def load_settings():
 
     if not os.path.isfile(SETTINGS_FILE):
         settings = {
-            'dbdir'  : DBDIR,
-            'outdir' : os.path.join(HOMEDIR,'Videos'),
+            'dbdir'      : DBDIR,
+            'outdir'     : os.path.join(HOMEDIR,'Videos'),
+            'everything' : False,
+            'extras'     : False,
         }
         save_settings(settings)
         return settings

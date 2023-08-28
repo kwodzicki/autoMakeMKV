@@ -1,3 +1,5 @@
+import logging
+
 import os, json
 
 from PyQt5.QtWidgets import QMessageBox
@@ -19,7 +21,7 @@ def checkInfo( parent, info ):
         message = "Must set Movie/Series Title"
     elif info['year'] == '':
         message = "Must set Movie/Series release year"
-    elif info['media_type'] == '':
+    elif ('media_type' in info) and (info['media_type'] == ''):
         message = "Must set media type!"
 
     if message is None:
@@ -40,24 +42,34 @@ def getDiscID( discDev, root=UUID_ROOT, **kwargs ):
             return item
     return None
 
-def info_path( discDev, **kwargs ):
+def info_path( discDev, dbdir=None, **kwargs ):
 
     uuid = getDiscID( discDev, **kwargs )
     if uuid is None:
         return None
-    return os.path.join( DBDIR, f"{uuid}.info.gz" )
 
-def loadData( discID=None, fpath=None ):
+    if dbdir is None:
+        dbdir = DBDIR
+
+    return os.path.join( dbdir, f"{uuid}.info.gz" )
+
+def loadData( discID=None, fpath=None, dbdir=None ):
+
+    log = logging.getLogger(__name__)
+    if dbdir is None:
+        dbdir = DBDIR
 
     if fpath is None:
-        fpath = os.path.join( DBDIR, f"{discID}{EXT}" )
+        fpath = os.path.join( dbdir, f"{discID}{EXT}" )
+
+    log.debug("Path to database file : %s", fpath)
     if not os.path.isfile( fpath ):
         return {} 
 
     with open(fpath, 'r') as fid:
         return json.load(fid)
 
-def saveData( info, discDev=None, discID=None, fpath=None, replace=False ):
+def saveData( info, discDev=None, discID=None, fpath=None, replace=False, dbdir=None ):
     """
     Arguments:
         discID (str) : Unique disc ID
@@ -66,10 +78,13 @@ def saveData( info, discDev=None, discID=None, fpath=None, replace=False ):
 
     """
 
+    if dbdir is None:
+        dbdir = DBDIR
+
     if fpath is None:
         if discDev is not None:
             discID = getDiscID( discDev )
-        fpath = os.path.join( DBDIR, f"{discID}{EXT}" )
+        fpath = os.path.join( dbdir, f"{discID}{EXT}" )
 
     if os.path.isfile( fpath ) and not replace:
         return False

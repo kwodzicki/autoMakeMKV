@@ -213,7 +213,7 @@ class DiscMetadata( BaseMetadata ):
         info = super().getInfo()
         info['media_type'] = self.media_type.currentText()
         info['upc'       ] = self.upc.text()
-
+        print(info)
         return info
 
     def setInfo(self, info):
@@ -407,7 +407,7 @@ class MainWidget( QtWidgets.QMainWindow ):
 
     default_title = 'Title'
 
-    def __init__(self, discDev, *args, debug=False, **kwargs ):
+    def __init__(self, discDev, *args, debug=False, dbdir=None, **kwargs ):
 
         super().__init__(*args, **kwargs)
 
@@ -417,6 +417,7 @@ class MainWidget( QtWidgets.QMainWindow ):
         self.info      = None
         self.discDev   = discDev
         self.discID    = getDiscID( discDev )
+        self.dbdir     = DBDIR if dbdir is None else dbdir
         self.discLabel = None
 
         self.setWindowTitle()
@@ -466,7 +467,7 @@ class MainWidget( QtWidgets.QMainWindow ):
         self.setCentralWidget( central )
         self.resize( 720, 720 )
 
-        self.loadDisc = MakeMKVThread( discDev, debug=debug )
+        self.loadDisc = MakeMKVThread( discDev, debug=debug, dbdir=self.dbdir )
         self.loadDisc.signal.connect( self.msgs.append )
         self.loadDisc.finished.connect( self.buildTitleTree )
         self.loadDisc.start()
@@ -499,7 +500,7 @@ class MainWidget( QtWidgets.QMainWindow ):
     def open( self, *args, **kwargs ):
 
         self.log.debug( 'Attempting to open disc JSON for editing' )
-        dialog = QtWidgets.QFileDialog( directory=DBDIR )
+        dialog = QtWidgets.QFileDialog( directory=self.dbdir)
         dialog.setDefaultSuffix('json')
         dialog.setNameFilters( ['JSON (*.json)'] )
         if dialog.exec_() != QtWidgets.QDialog.Accepted:
@@ -568,7 +569,7 @@ class MainWidget( QtWidgets.QMainWindow ):
                 message.Yes | message.No
         )
         if res == message.Yes:
-            saveData(info, discID=self.discID, replace=True)
+            saveData(info, discID=self.discID, replace=True, dbdir=self.dbdir)
             self.info = info if kwargs.get('rip', False) else 'skiprip'
             self.close()
 

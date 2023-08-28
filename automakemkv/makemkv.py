@@ -54,12 +54,12 @@ class MakeMKVParser( ):
     Class to parse makemkvcon output
     """
 
-    def __init__(self, discDev='/dev/sr0', **kwargs):
+    def __init__(self, discDev='/dev/sr0', dbdir=None, **kwargs):
         super().__init__()
 
         self._debug    = kwargs.get('debug', False)
         self.disc_dev  = discDev
-        self.info_path = utils.info_path( discDev )
+        self.info_path = utils.info_path( discDev, dbdir=dbdir )
         self.discInfo  = {}
         self.titles    = {}
         self.log       = logging.getLogger(__name__).debug

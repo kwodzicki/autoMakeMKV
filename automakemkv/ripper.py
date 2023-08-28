@@ -13,7 +13,7 @@ from threading import Thread, Event
 
 import pyudev
 
-from . import UUID_ROOT
+from . import UUID_ROOT, DBDIR
 from .mediaInfo import getTitleInfo
 from .makemkv import makemkvcon
 from .utils import video_utils_outfile
@@ -90,6 +90,7 @@ class RipperWatchdog(Thread):
     
         self._outdir = None
 
+        self.dbdir      = kwargs.get('dbdir', DBDIR)
         self.outdir     = outdir
         self.everything = everything
         self.extras     = extras
@@ -110,6 +111,18 @@ class RipperWatchdog(Thread):
         os.makedirs(val, exist_ok=True)
         self.__log.info('Output directory set to : %s', val)
         self._outdir = val
+
+    def set_settings(self, **kwargs):
+        """
+        Set options for ripping discs
+
+        """
+
+        self.__log.debug('Updating ripping options')
+        self.dbdir      = kwargs.get('dbdir',      self.dbdir)
+        self.outdir     = kwargs.get('outdir',     self.outdir)
+        self.everything = kwargs.get('everything', self.everything)
+        self.extras     = kwargs.get('extras',     self.extras)
 
     def run(self):
 
@@ -135,6 +148,7 @@ class RipperWatchdog(Thread):
                 Process(
                     target = rip_disc,
                     args   = (dev, self.root, self.outdir, self.everything, self.extras, self.fileGen),
+                    kwargs = {'dbdir' : self.dbdir},
                 ).start()
                 continue
 
@@ -161,7 +175,7 @@ def is_mounted( dev ):
 
     return returncode == 0
 
-def rip_disc( dev, root, outdir, everything, extras, fileGen ):
+def rip_disc( dev, root, outdir, everything, extras, fileGen, dbdir=None ):
     """
     Rip a whole disc
 
@@ -181,7 +195,7 @@ def rip_disc( dev, root, outdir, everything, extras, fileGen ):
 
     log = logging.getLogger(__name__)
 
-    info = getTitleInfo( dev, root )
+    info = getTitleInfo( dev, root, dbdir=dbdir )
     if info is None:
         log.error( "No title information found/entered : %s", dev )
         return

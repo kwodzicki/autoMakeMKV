@@ -10,7 +10,6 @@ STREAM.setFormatter(
         '%(asctime)s [%(levelname).4s] %(message)s'
     )
 )
-LOG.addHandler( STREAM )
 
 APPDIR = os.path.dirname( os.path.abspath( __file__ ) )
 DBDIR  = os.path.join( os.path.expanduser('~'), f".{__name__}DB" )

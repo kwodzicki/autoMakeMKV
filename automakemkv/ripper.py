@@ -4,19 +4,20 @@ Utilities for ripping titles
 """
 
 import logging
+from logging.handlers import QueueHandler
 import os
 import signal
 import time
 import subprocess
-from multiprocessing import Process
-from threading import Event
+import multiprocessing as mp
+from threading import Thread, Event
 
 import pyudev
 
 from . import UUID_ROOT
 from .mediaInfo import getTitleInfo
 from .makemkv import makemkvcon
-from .utils import video_utils_outfile
+from .utils import video_utils_outfile, logger_thread
 
 KEY     = 'DEVNAME'
 CHANGE  = 'DISK_MEDIA_CHANGE'
@@ -84,11 +85,21 @@ def watchdog( outdir, everything=False, extras=False, root=UUID_ROOT, fileGen=vi
     log.debug( "%s started", __name__ )
 
     mounting  = []
-    mounted   = []
+    mounted   = {} 
     lastevent = {}
+
+    log_queue = mp.Queue()
+
+    lp = Thread(
+        target = logger_thread,
+        args   = (log_queue,),
+    )
+    lp.start()
+ 
     context   = pyudev.Context()
     monitor   = pyudev.Monitor.from_netlink(context)
     monitor.filter_by(subsystem='block')
+
     while RUNNING.is_set():
         device = monitor.poll(timeout=1.0)
         if device is None:
@@ -106,36 +117,33 @@ def watchdog( outdir, everything=False, extras=False, root=UUID_ROOT, fileGen=vi
                 continue
             log.debug('Finished mounting : %s', dev )
             mounting.remove( dev )
-            mounted.append( dev )
-            Process(
+            proc = mp.Process(
                 target = rip_disc,
                 args   = (dev, root, outdir, everything, extras, fileGen),
-            ).start()
+                kwargs = {'log_queue' : log_queue}, 
+            )
+            proc.start()
+            mounted[dev] = proc 
             continue
 
-        # If def is NOT in mounted, initialize to False
+        # If dev is NOT in mounted, initialize to False
         if dev not in mounted:
-            log.info( 'Device is mounting : %s', dev )
-            mounting.append( dev )
+            if (dev not in mounting):
+                log.info( 'Device is mounting : %s', dev )
+                mounting.append( dev )
         else:
-            mounted.remove(dev)
             log.info( 'Device has been ejected : %s', dev )
+            proc = mounted.pop(dev)
+            if proc.is_alive():
+                log.warning('Killing the ripper process!')
+                proc.terminate()
+            else:
+                log.debug("Exitcode from ripping processes : %d", proc.exitcode)
 
-def is_mounted( dev ):
-    """
-    Check if disc is mounted
+    log_queue.put(None)
+    lp.join()
 
-    """
-
-    returncode = subprocess.run(
-        ['file', '-s', dev],
-        stdout = subprocess.DEVNULL,
-        stderr = subprocess.STDOUT,
-    ).returncode
-
-    return returncode == 0
-
-def rip_disc( dev, root, outdir, everything, extras, fileGen ):
+def rip_disc( dev, root, outdir, everything, extras, fileGen, log_queue=None ):
     """
     Rip a whole disc
 
@@ -152,6 +160,12 @@ def rip_disc( dev, root, outdir, everything, extras, fileGen ):
         extras (bool) : Flag for if should rip extras
 
     """
+
+    if isinstance(log_queue, mp.queues.Queue):
+        qh = QueueHandler(log_queue)
+        root_log = logging.getLogger()
+        root_log.setLevel(logging.DEBUG)
+        root_log.addHandler(qh)
 
     log = logging.getLogger(__name__)
 

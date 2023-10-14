@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 import argparse
 
-from automakemkv import STREAM
+from multiprocessing import set_start_method
+
+from automakemkv import LOG, STREAM
 from automakemkv.ripper import watchdog 
 
 if __name__ == "__main__":
@@ -13,5 +15,8 @@ if __name__ == "__main__":
 
 
     args = parser.parse_args()
+    set_start_method('spawn')
+
     STREAM.setLevel( args.loglevel )
+    LOG.addHandler(STREAM)
     watchdog( args.outdir, everything=args.all, extras=args.extras )

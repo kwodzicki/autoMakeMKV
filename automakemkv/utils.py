@@ -9,6 +9,7 @@ program suite.
 
 """
 
+import logging
 import os
 import re
 
@@ -213,12 +214,20 @@ def video_utils_series( outdir, info, ext, *args, **kwargs ):
     """
 
     for tid, title in info['titles'].items():
-        if title['extra'] == '':
-            season  = int(title['season'] )
-            episode = int(title['episode'])
-            fpath   = [ video_utils_dbkey( title ), f"S{season:02d}E{episode:02d}" ]
-        else:
+        if title['extra'] != '':
             continue
+
+        season  = int(title['season'] )
+        season  = f"S{season:02d}"
+        episode = list(map(int, title['episode'].split('-')))
+        if len(episode) == 1:
+            episode = f"E{episode[0]:02d}"
+        elif len(episode) > 1:
+            episode = f"E{min(episode):02d}-{max(episode):02d}"
+        else:
+            raise Exception("Issue with epsiode numbering")
+
+        fpath   = [ video_utils_dbkey( title ), season+episode ]
 
         yield tid, os.path.join( outdir, '.'.join(fpath)+ext )
 
@@ -302,3 +311,20 @@ def replace_chars( *args, repl = ' ', **kwargs ):
 
     # Iterate over all input arguments, returning list
     return [ _replace( arg, repl, **kwargs ) for arg in args ]
+
+def logger_thread(q):
+    """
+    To handle logs from other processes
+
+    Arguments:
+        q (Queue) : A multiprocessing Queue object that will contain
+            log objects from other processes.
+
+    """
+
+    while True:
+        record = q.get()
+        if record is None:
+            break
+        logger = logging.getLogger(record.name)
+        logger.handle(record)

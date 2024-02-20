@@ -178,8 +178,8 @@ def video_utils_movie( outdir, info, ext, everything, extras, **kwargs ):
         fpath = [ video_utils_dbkey(title), '' ]
         # If extraTitle is NOT empty, then title is an extra
         if title['extraTitle'] != '':
-            # If neither all nor extras is set, then we aren't ripping extras
-            if not (everything or extras):
+            # If is NOT 'edition' and neither all nor extras is set, then we aren't ripping title
+            if title['extra'] != 'edition' and not (everything or extras):
                 continue
             extra = [title['extra'], replace_chars(title['extraTitle'])]
             if extra[0] != 'edition':

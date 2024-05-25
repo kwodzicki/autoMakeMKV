@@ -21,9 +21,11 @@ from PyQt5.QtWidgets import (
     QHBoxLayout,
 )
 from PyQt5.QtGui import QIcon
+from PyQt5.QtCore import QTimer
 
 from . import HOMEDIR, DBDIR, SETTINGS_FILE
 from .ripper import RipperWatchdog, RUNNING
+
 
 class SystemTray(QSystemTrayIcon):
     """
@@ -43,7 +45,7 @@ class SystemTray(QSystemTrayIcon):
 
         self.__log = logging.getLogger(__name__)
         self._settingsInfo = None
-        self._app  = app
+        self._app = app
         self._menu = QMenu()
 
         self._label = QAction( 'autoMakeMKV' )
@@ -67,6 +69,12 @@ class SystemTray(QSystemTrayIcon):
         self.ripper = RipperWatchdog(**settings)
         self.ripper.start()
 
+        # Set up check of output directory exists to run right after event loop starts
+        QTimer.singleShot(
+            0,
+            self.check_outdir_exists,
+        )
+
     def settings_widget(self, *args, **kwargs):
 
         self.__log.debug( 'opening settings' )
@@ -79,6 +87,11 @@ class SystemTray(QSystemTrayIcon):
     def quit(self, *args, **kwargs):
         """Display quit confirm dialog"""
 
+        if kwargs.get('force', False):
+            self.__log.info('Force quit')
+            self.ripper.quit()
+            self._app.quit()
+
         msg = QMessageBox()
         msg.setIcon(QMessageBox.Warning)
         msg.setText("Are you sure you want to quit?")
@@ -86,30 +99,86 @@ class SystemTray(QSystemTrayIcon):
         msg.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
         res = msg.exec_()
         if res == QMessageBox.Yes:
-            RUNNING.clear()
+            self.ripper.quit()
             self._app.quit()
+
+    def check_outdir_exists(self):
+        """
+        Check that video output directory exists
+
+        """
+
+        if os.path.isdir(self.ripper.outdir):
+            return
+
+        dlg = MissingOutdirDialog(self.ripper.outdir)
+        if not dlg.exec_():
+            self.quit(force=True)
+            return
+
+        path = QFileDialog.getExistingDirectory(
+            QDialog(),
+            'autoMakeMKV: Select Output Folder',
+        )
+        if path != '':
+            self.ripper.outdir = path
+            save_settings(
+                self.ripper.get_settings(),
+            )
+            return
+
+        self.check_outdir_exists()
+
+
+class MissingOutdirDialog(QDialog):
+    def __init__(self, outdir):
+        super().__init__()
+
+        self.setWindowTitle("autoMakeMKV: Output Directory Missing!")
+
+        QBtn = QDialogButtonBox.Ok | QDialogButtonBox.Abort
+
+        self.buttonBox = QDialogButtonBox(QBtn)
+        self.buttonBox.accepted.connect(self.accept)
+        self.buttonBox.rejected.connect(self.reject)
+
+        self.layout = QVBoxLayout()
+        message = (
+            "Could not find the requested output directory: ",
+            os.linesep,
+            outdir,
+            os.linesep,
+            "Would you like to select a new one?",
+        ) 
+        message = QLabel(
+            os.linesep.join(message)
+        )
+        self.layout.addWidget(message)
+        self.layout.addWidget(self.buttonBox)
+        self.setLayout(self.layout)
+
 
 class SettingsWidget( QDialog ):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
-        self.dbdir      = PathSelector('Database Location:')
-        self.outdir     = PathSelector('Output Location:')
+        self.dbdir = PathSelector('Database Location:')
+        self.outdir = PathSelector('Output Location:')
 
-        radio_layout    = QVBoxLayout()
-        self.features   = QRadioButton("Only Features")
-        self.extras     = QRadioButton("Only Extras")
+        radio_layout = QVBoxLayout()
+        self.features = QRadioButton("Only Features")
+        self.extras = QRadioButton("Only Extras")
         self.everything = QRadioButton("All Titles")
         radio_layout.addWidget(self.features)
         radio_layout.addWidget(self.extras)
         radio_layout.addWidget(self.everything)
-        radio_widget    = QWidget()
+        radio_widget = QWidget()
         radio_widget.setLayout(radio_layout)
 
         self.set_settings()
 
-        buttons    = QDialogButtonBox.Save | QDialogButtonBox.Cancel
+        buttons = QDialogButtonBox.Save | QDialogButtonBox.Cancel
         button_box = QDialogButtonBox(buttons) 
         button_box.accepted.connect(self.accept)
         button_box.rejected.connect(self.reject)
@@ -137,25 +206,26 @@ class SettingsWidget( QDialog ):
     def get_settings(self):
 
         settings = {
-            'dbdir'      : self.dbdir.getText(),
-            'outdir'     : self.outdir.getText(),
-            'extras'     : self.extras.isChecked(),
-            'everything' : self.everything.isChecked(),
+            'dbdir': self.dbdir.getText(),
+            'outdir': self.outdir.getText(),
+            'extras': self.extras.isChecked(),
+            'everything': self.everything.isChecked(),
         }
         save_settings(settings)
         return settings
+
 
 class PathSelector(QWidget):
 
     def __init__(self, label, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
-        self.__log       = logging.getLogger(__name__)
-        self.path        = None
+        self.__log = logging.getLogger(__name__)
+        self.path = None
 
-        self.path_text   = QLineEdit()
+        self.path_text = QLineEdit()
         self.path_button = QPushButton('Select Path')
-        self.path_button.clicked.connect( self.path_select )
+        self.path_button.clicked.connect(self.path_select)
 
         layout = QHBoxLayout()
         layout.addWidget(self.path_text) 
@@ -184,14 +254,15 @@ class PathSelector(QWidget):
             self.setText(path)
             self.__log.info(path)
 
+
 def load_settings():
 
     if not os.path.isfile(SETTINGS_FILE):
         settings = {
-            'dbdir'      : DBDIR,
-            'outdir'     : os.path.join(HOMEDIR,'Videos'),
-            'everything' : False,
-            'extras'     : False,
+            'dbdir': DBDIR,
+            'outdir': os.path.join(HOMEDIR, 'Videos'),
+            'everything': False,
+            'extras': False,
         }
         save_settings(settings)
         return settings
@@ -202,6 +273,7 @@ def load_settings():
     with open(SETTINGS_FILE, 'r') as fid:
         return json.load(fid)
 
+
 def save_settings(settings):
 
     logging.getLogger(__name__).debug(
@@ -209,11 +281,12 @@ def save_settings(settings):
     )
     with open(SETTINGS_FILE, 'w') as fid:
         json.dump(settings, fid)
+
      
-if __name__ == "__main__":
+def main():
     import sys
-    app = QApplication( sys.argv )
+    app = QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)
-    w   = SystemTray( app )
+    w = SystemTray(app)
     app.exec_()
 

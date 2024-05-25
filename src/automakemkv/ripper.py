@@ -104,7 +104,7 @@ class RipperWatchdog(Thread):
 
         self.lp = Thread(
             target=logger_thread,
-            args=(log_queue,),
+            args=(self.log_queue,),
         )
         self.lp.start()
  
@@ -127,7 +127,7 @@ class RipperWatchdog(Thread):
         return self._outdir
     @outdir.setter
     def outdir(self, val):
-        os.makedirs(val, exist_ok=True)
+        #os.makedirs(val, exist_ok=True)
         self.__log.info('Output directory set to : %s', val)
         self._outdir = val
 
@@ -138,10 +138,19 @@ class RipperWatchdog(Thread):
         """
 
         self.__log.debug('Updating ripping options')
-        self.dbdir      = kwargs.get('dbdir',      self.dbdir)
-        self.outdir     = kwargs.get('outdir',     self.outdir)
+        self.dbdir = kwargs.get('dbdir', self.dbdir)
+        self.outdir = kwargs.get('outdir', self.outdir)
         self.everything = kwargs.get('everything', self.everything)
-        self.extras     = kwargs.get('extras',     self.extras)
+        self.extras = kwargs.get('extras', self.extras)
+
+    def get_settings(self):
+
+        return {
+            'dbdir': self.dbdir,
+            'outdir': self.outdir,
+            'everything': self.everything,
+            'extras': self.extras,
+        }
 
     def run(self):
 
@@ -177,7 +186,7 @@ class RipperWatchdog(Thread):
                     ),
                     kwargs={
                         'dbdir': self.dbdir,
-                        'log_queue': log_queue,
+                        'log_queue': self.log_queue,
                     }, 
                 )
                 proc.start()
@@ -198,6 +207,10 @@ class RipperWatchdog(Thread):
 
         self.log_queue.put(None)
         self.lp.join()
+
+    def quit(self, *args, **kwargs):
+        RUNNING.clear()
+
 
 def rip_disc(dev, root, outdir, everything, extras, fileGen, dbdir=None, log_queue=None):
     """

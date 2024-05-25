@@ -5,6 +5,7 @@ Utilities for ripping titles
 
 import logging
 from logging.handlers import QueueHandler
+import argparse
 import os
 import signal
 import time
@@ -14,7 +15,7 @@ from threading import Thread, Event
 
 import pyudev
 
-from . import UUID_ROOT
+from . import UUID_ROOT, LOG, STREAM
 from .mediaInfo import getTitleInfo
 from .makemkv import makemkvcon
 from .utils import video_utils_outfile, logger_thread
@@ -236,3 +237,19 @@ def rip_title( src, title, outfile ):
     os.rmdir( tmpdir )
 
     return status
+
+
+def cli():
+    parser = argparse.ArgumentParser()
+    parser.add_argument( 'outdir',     type=str, help='Directory to save ripped titles to')
+    parser.add_argument( '--loglevel', type=int, default=30, help='Set logging level')
+    parser.add_argument( '--all',    action='store_true', help="If set, all tiltes (main and extra) will be ripped" )
+    parser.add_argument( '--extras', action='store_true', help="If set, only 'extra' titles will be ripped" )
+
+
+    args = parser.parse_args()
+    mp.set_start_method('spawn')
+
+    STREAM.setLevel( args.loglevel )
+    LOG.addHandler(STREAM)
+    watchdog( args.outdir, everything=args.all, extras=args.extras )

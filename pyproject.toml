@@ -34,7 +34,8 @@ dependencies = [
 ]
 
 [project.scripts]
-autoMakeMKV = ""
+autoMakeMKV = "automakemkv.ripper:cli"
+autoMakeMKV_gui = "automakemkv.mediaInfo:cli"
 
 [tool.setuptools.packages.find]
 where = ["src"]

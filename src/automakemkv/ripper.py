@@ -4,22 +4,25 @@ Utilities for ripping titles
 """
 
 import logging
+from logging.handlers import QueueHandler
+import argparse
 import os
 import signal
 import time
 import subprocess
-from multiprocessing import Process
+import multiprocessing as mp
 from threading import Thread, Event
 
 import pyudev
 
-from . import UUID_ROOT, DBDIR
+from . import UUID_ROOT, DBDIR, LOG, STREAM
 from .mediaInfo import getTitleInfo
 from .makemkv import makemkvcon
-from .utils import video_utils_outfile
+from .utils import video_utils_outfile, logger_thread
 
 KEY     = 'DEVNAME'
 CHANGE  = 'DISK_MEDIA_CHANGE'
+STATUS  = "ID_CDROM_MEDIA_STATE"
 TIMEOUT = 10.0
 
 RUNNING = Event()
@@ -57,7 +60,15 @@ class RipperWatchdog(Thread):
 
     """
 
-    def __init__(self, outdir, everything=False, extras=False, root=UUID_ROOT, fileGen=video_utils_outfile, **kwargs):
+    def __init__(
+        self,
+        outdir,
+        everything=False,
+        extras=False,
+        root=UUID_ROOT,
+        fileGen=video_utils_outfile,
+        **kwargs,
+    ):
         """
         Arguments:
             outdir (str) : Top-level directory for ripping
@@ -89,18 +100,26 @@ class RipperWatchdog(Thread):
         self.__log.debug( "%s started", __name__ )
     
         self._outdir = None
+        self.log_queue = mp.Queue()
 
-        self.dbdir      = kwargs.get('dbdir', DBDIR)
-        self.outdir     = outdir
+        self.lp = Thread(
+            target=logger_thread,
+            args=(log_queue,),
+        )
+        self.lp.start()
+ 
+ 
+        self.dbdir = kwargs.get('dbdir', DBDIR)
+        self.outdir = outdir
         self.everything = everything
-        self.extras     = extras
-        self.root       = root
-        self.fileGen    = fileGen
+        self.extras = extras
+        self.root = root
+        self.fileGen = fileGen
 
-        self._mounting  = []
-        self._mounted   = []
-        self._context   = pyudev.Context()
-        self._monitor   = pyudev.Monitor.from_netlink(self._context)
+        self._mounting = {} 
+        self._mounted = {}
+        self._context = pyudev.Context()
+        self._monitor = pyudev.Monitor.from_netlink(self._context)
         self._monitor.filter_by(subsystem='block')
 
     @property
@@ -138,44 +157,49 @@ class RipperWatchdog(Thread):
                 continue
 
             # If we did NOT change an insert/eject event
-            if device.properties.get(CHANGE, None) is None:
-                if dev not in self._mounting:
-                    self.__log.debug( 'Caught event that was NOT insert/eject, ignoring : %s', dev )
+            if device.properties.get(CHANGE, None):
+                if device.properties.get(STATUS, '') != 'complete':
+                    self.__log.debug(
+                        'Caught event that was NOT insert/eject, ignoring : %s',
+                        dev,
+                    )
                     continue
-                self.__log.debug('Finished mounting : %s', dev )
-                self._mounting.remove( dev )
-                self._mounted.append( dev )
-                Process(
-                    target = rip_disc,
-                    args   = (dev, self.root, self.outdir, self.everything, self.extras, self.fileGen),
-                    kwargs = {'dbdir' : self.dbdir},
-                ).start()
+                self.__log.debug('Finished mounting : %s', dev)
+                proc = mp.Process(
+                    target=rip_disc,
+                    args=(
+                        dev,
+                        self.root,
+                        self.outdir,
+                        self.everything,
+                        self.extras,
+                        self.fileGen,
+                    ),
+                    kwargs={
+                        'dbdir': self.dbdir,
+                        'log_queue': log_queue,
+                    }, 
+                )
+                proc.start()
+                mounted[dev] = proc 
                 continue
 
-            # If def is NOT in mounted, initialize to False
+            # If dev is NOT in mounted, initialize to False
             if dev not in self._mounted:
-                self.__log.info( 'Device is mounting : %s', dev )
-                self._mounting.append( dev )
+                self.__log.info('Odd event : %s', dev)
             else:
-                self._mounted.remove(dev)
-                self.__log.info( 'Device has been ejected : %s', dev )
-        self.__log.info('Watchdog thread dead')
+                self.__log.info('Device has been ejected : %s', dev)
+                proc = self._mounted.pop(dev)
+                if proc.is_alive():
+                    self.__log.warning('Killing the ripper process!')
+                    proc.terminate()
+                else:
+                    self.__log.debug("Exitcode from ripping processes : %d", proc.exitcode)
 
-def is_mounted( dev ):
-    """
-    Check if disc is mounted
+        self.log_queue.put(None)
+        self.lp.join()
 
-    """
-
-    returncode = subprocess.run(
-        ['file', '-s', dev],
-        stdout = subprocess.DEVNULL,
-        stderr = subprocess.STDOUT,
-    ).returncode
-
-    return returncode == 0
-
-def rip_disc( dev, root, outdir, everything, extras, fileGen, dbdir=None ):
+def rip_disc(dev, root, outdir, everything, extras, fileGen, dbdir=None, log_queue=None):
     """
     Rip a whole disc
 
@@ -193,21 +217,27 @@ def rip_disc( dev, root, outdir, everything, extras, fileGen, dbdir=None ):
 
     """
 
+    if isinstance(log_queue, mp.queues.Queue):
+        qh = QueueHandler(log_queue)
+        root_log = logging.getLogger()
+        root_log.setLevel(logging.DEBUG)
+        root_log.addHandler(qh)
+
     log = logging.getLogger(__name__)
 
-    info = getTitleInfo( dev, root, dbdir=dbdir )
+    info = getTitleInfo(dev, root, dbdir=dbdir)
     if info is None:
-        log.error( "No title information found/entered : %s", dev )
+        log.error("No title information found/entered : %s", dev)
         return
 
     if info != 'skiprip':
         for title, fpath in fileGen(outdir, info, everything=everything, extras=extras):
-            rip_title( f"dev:{dev}", title, fpath )
+            rip_title(f"dev:{dev}", title, fpath)
     else:
-        log.info( "Just saving metadata, not ripping : %s", dev )
+        log.info("Just saving metadata, not ripping : %s", dev)
 
     try:
-        os.system( f"eject {dev}" )
+        os.system(f"eject {dev}")
     except:
         pass
 
@@ -265,3 +295,19 @@ def rip_title( src, title, outfile ):
     os.rmdir( tmpdir )
 
     return status
+
+
+def cli():
+    parser = argparse.ArgumentParser()
+    parser.add_argument( 'outdir',     type=str, help='Directory to save ripped titles to')
+    parser.add_argument( '--loglevel', type=int, default=30, help='Set logging level')
+    parser.add_argument( '--all',    action='store_true', help="If set, all tiltes (main and extra) will be ripped" )
+    parser.add_argument( '--extras', action='store_true', help="If set, only 'extra' titles will be ripped" )
+
+
+    args = parser.parse_args()
+    mp.set_start_method('spawn')
+
+    STREAM.setLevel( args.loglevel )
+    LOG.addHandler(STREAM)
+    watchdog( args.outdir, everything=args.all, extras=args.extras )

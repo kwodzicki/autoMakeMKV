@@ -21,6 +21,7 @@ from .utils import video_utils_outfile, logger_thread
 
 KEY     = 'DEVNAME'
 CHANGE  = 'DISK_MEDIA_CHANGE'
+STATUS  = "ID_CDROM_MEDIA_STATE"
 TIMEOUT = 10.0
 
 RUNNING = Event()
@@ -84,7 +85,6 @@ def watchdog( outdir, everything=False, extras=False, root=UUID_ROOT, fileGen=vi
     log     = logging.getLogger( __name__ )
     log.debug( "%s started", __name__ )
 
-    mounting  = []
     mounted   = {} 
     lastevent = {}
 
@@ -111,12 +111,11 @@ def watchdog( outdir, everything=False, extras=False, root=UUID_ROOT, fileGen=vi
             continue
 
         # If we did NOT change an insert/eject event
-        if device.properties.get(CHANGE, None) is None:
-            if dev not in mounting:
+        if device.properties.get(CHANGE, None):
+            if device.properties.get(STATUS, '') != 'complete':
                 log.debug( 'Caught event that was NOT insert/eject, ignoring : %s', dev )
                 continue
             log.debug('Finished mounting : %s', dev )
-            mounting.remove( dev )
             proc = mp.Process(
                 target = rip_disc,
                 args   = (dev, root, outdir, everything, extras, fileGen),
@@ -128,9 +127,7 @@ def watchdog( outdir, everything=False, extras=False, root=UUID_ROOT, fileGen=vi
 
         # If dev is NOT in mounted, initialize to False
         if dev not in mounted:
-            if (dev not in mounting):
-                log.info( 'Device is mounting : %s', dev )
-                mounting.append( dev )
+            log.info( 'Odd event : %s', dev )
         else:
             log.info( 'Device has been ejected : %s', dev )
             proc = mounted.pop(dev)

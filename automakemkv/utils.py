@@ -174,6 +174,8 @@ def video_utils_movie( outdir, info, ext, everything, extras, **kwargs ):
 
     """
 
+    log = logging.getLogger(__name__)
+
     for tid, title in info['titles'].items():
         fpath = [ video_utils_dbkey(title), '' ]
         # If extraTitle is NOT empty, then title is an extra
@@ -187,6 +189,14 @@ def video_utils_movie( outdir, info, ext, everything, extras, **kwargs ):
             fpath[-1] = '-'.join(extra)
         elif extras:
             continue
+
+        log.info(
+            "Will rip: %s (%s) %s-%s",
+            title.get('title', ''),
+            title.get('year', 'XXXX'),
+            title.get('extra', 'extra'),
+            title.get('extraTitle', '') or 'NA',
+        )
         yield tid, os.path.join( outdir, '.'.join(fpath)+ext )
 
 def video_utils_series( outdir, info, ext, *args, **kwargs ):
@@ -213,6 +223,8 @@ def video_utils_series( outdir, info, ext, *args, **kwargs ):
 
     """
 
+    log = logging.getLogger(__name__)
+
     for tid, title in info['titles'].items():
         if title['extra'] != '':
             continue
@@ -228,7 +240,16 @@ def video_utils_series( outdir, info, ext, *args, **kwargs ):
             raise Exception("Issue with epsiode numbering")
 
         fpath   = [ video_utils_dbkey( title ), season+episode ]
-
+        log.info(
+            "Will rip: %s (%s) S%sE%s %s-%s",
+            title.get('title', ''),
+            title.get('year', 'XXXX'),
+            title.get('season', 'XX').zfill(2),
+            title.get('episode', 'XX').zfill(2),
+            title.get('extra', 'extra'),
+            title.get('extraTitle', '') or 'NA',
+        )
+ 
         yield tid, os.path.join( outdir, '.'.join(fpath)+ext )
 
 def video_utils_outfile( outdir, info, ext='.mkv', everything=False, extras=False ):

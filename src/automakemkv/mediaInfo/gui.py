@@ -20,9 +20,10 @@ MEDIATYPES   = [
 
 def main( discDev='/dev/sr0', **kwargs ):
 
-    app = QtWidgets.QApplication(['MakeMKV MediaID'])
+#    app = QtWidgets.QApplication(['MakeMKV MediaID'])
     mediaIDs = MainWidget( discDev, **kwargs )
-    app.exec_()
+    mediaIDs.exec_()
+#    app.exec_()
 
     return mediaIDs.info
 
@@ -403,7 +404,8 @@ class TitleMetadata( BaseMetadata ):
 
         self.extra.addItems( EXTRATYPES )
             
-class MainWidget( QtWidgets.QMainWindow ):
+#class MainWidget(QtWidgets.QMainWindow):
+class MainWidget(QtWidgets.QDialog):
 
     default_title = 'Title'
 
@@ -412,12 +414,11 @@ class MainWidget( QtWidgets.QMainWindow ):
         super().__init__(*args, **kwargs)
 
         self.log = logging.getLogger( __name__ )
-        self._initMenu()
         self.curTitle  = None
         self.info      = None
         self.discDev   = discDev
         self.discID    = getDiscID( discDev )
-        self.dbdir     = DBDIR if dbdir is None else dbdir
+        self.dbdir     = dbdir or DBDIR
         self.discLabel = None
 
         self.setWindowTitle()
@@ -461,10 +462,16 @@ class MainWidget( QtWidgets.QMainWindow ):
         layout.addWidget( self.msgs,          3, 0, 1, 2 )
         layout.addWidget( self.save_but,      4, 0, 1, 2 )
         layout.addWidget( self.rip_but,       5, 0, 1, 2 )
+        
 
-        central = QtWidgets.QWidget()
-        central.setLayout( layout )
-        self.setCentralWidget( central )
+        layout.setMenuBar(
+            self._initMenu()
+        )
+
+        #central = QtWidgets.QWidget()
+        #central.setLayout( layout )
+        #self.setCentralWidget( central )
+        self.setLayout(layout)
         self.resize( 720, 720 )
 
         self.loadDisc = MakeMKVThread( discDev, debug=debug, dbdir=self.dbdir )
@@ -477,18 +484,26 @@ class MainWidget( QtWidgets.QMainWindow ):
     def _initMenu(self):
 
         self.log.debug( 'Initializing menu' )
-        menuBar    = self.menuBar()
+        menu_bar = QtWidgets.QMenuBar()  # self.menuBar()
 
-        fileMenu   = menuBar.addMenu("File")
-        actionOpen = QtWidgets.QAction("&Open...", self)
-        actionOpen.triggered.connect( self.open )
-        fileMenu.addAction( actionOpen )
+        file_menu = menu_bar.addMenu("File")
 
-        actionSave = QtWidgets.QAction("&Save", self)
-        actionSave.triggered.connect( self.save )
-        fileMenu.addAction(actionSave)
-        fileMenu.addSeparator()
-        fileMenu.addAction("Quit")
+        action_open = QtWidgets.QAction("&Open...", self)
+        action_open.triggered.connect(self.open)
+        action_save = QtWidgets.QAction("&Save", self)
+        action_save.triggered.connect(self.save)
+        action_quit = QtWidgets.QAction("&Quit", self)
+        action_quit.triggered.connect(self.quit) 
+
+        file_menu.addAction(action_open)
+        file_menu.addAction(action_save)
+        file_menu.addSeparator()
+        file_menu.addAction(action_quit)
+        return menu_bar
+
+    def quit(self, *args, **kwargs):
+        self.loadDisc.kill()
+        self.done(0)
 
     def setWindowTitle( self ):
 
@@ -571,7 +586,7 @@ class MainWidget( QtWidgets.QMainWindow ):
         if res == message.Yes:
             saveData(info, discID=self.discID, replace=True, dbdir=self.dbdir)
             self.info = info if kwargs.get('rip', False) else 'skiprip'
-            self.close()
+            self.done(0)
 
     def selectTitle( self, obj, col ):
         """
@@ -661,3 +676,5 @@ class MainWidget( QtWidgets.QMainWindow ):
         self.titleTree.currentItemChanged.connect( self.selectTitle )           # Run given method one object in QTreeWidget is clicked
         self.save_but.setEnabled( True )  # Enable 'Apply' Button after the tree is populated
         self.rip_but.setEnabled( True )  # Enable 'Apply' Button after the tree is populated
+
+

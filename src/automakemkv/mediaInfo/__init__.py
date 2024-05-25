@@ -7,17 +7,17 @@ from .utils import getDiscID, loadData
 from .gui import main
 
 
-def getTitleInfo( discDev, root ):
+def getTitleInfo(discDev, root, dbdir=None):
 
     log = logging.getLogger(__name__)
-    uuid = getDiscID( discDev, root )
+    uuid = getDiscID(discDev, root)
     if uuid is None: return
 
     log.info("UUID of disc: %s", uuid)
 
-    info = loadData( discID=uuid )
+    info = loadData(discID=uuid)
     if len(info) == 0:
-        info = main( discDev )
+        info = main(discDev, dbdir=dbdir)
 
     return info
 

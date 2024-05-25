@@ -63,6 +63,7 @@ class MakeMKVParser( ):
         self.discInfo  = {}
         self.titles    = {}
         self.log       = logging.getLogger(__name__).debug
+        self.proc = None
 
     def loadFile(self, json=None):
 
@@ -79,12 +80,17 @@ class MakeMKVParser( ):
 
         if self.info_path is None:
             return
-        proc = makemkvcon('info', f'dev:{self.disc_dev}', minlength=0, robot=True)
-        with gzip.open( self.info_path, 'wt' ) as fid:
-            for line in iter(proc.stdout.readline, ''):
+        self.proc = makemkvcon(
+            'info',
+            f'dev:{self.disc_dev}',
+            minlength=0,
+            robot=True,
+        )
+        with gzip.open(self.info_path, 'wt') as fid:
+            for line in iter(self.proc.stdout.readline, ''):
                 fid.write( line )
                 self.parse_line( line )
-        proc.wait()
+        self.proc.wait()
 
     def parse_line( self, line ):
         """Parse lines from makemkvcon"""
@@ -94,7 +100,7 @@ class MakeMKVParser( ):
 
         if infoType == 'MSG':
             _, _, _, val, *_ = SPLIT.findall( data )
-            self.log( val.strip('"') )
+            self.log(val.strip('"'))
         elif infoType == 'CINFO':
             cid, _, val = SPLIT.findall( data )
             if cid in AP:
@@ -112,6 +118,17 @@ class MakeMKVParser( ):
                 tt[stream] = {}
             if sid in AP:
                 tt[stream][ AP[sid] ] = val.strip('"')
+
+    def kill(self):
+        self.log('Attempting to kill process')
+        if self.proc is None:
+            return
+        if self.proc.poll() is not None:
+            self.log('Process already finished')
+            return
+        self.log('Killing process')
+        self.proc.kill()
+
 
 class MakeMKVThread( MakeMKVParser, QtCore.QThread ):
     """

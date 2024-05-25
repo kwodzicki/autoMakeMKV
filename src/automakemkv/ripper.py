@@ -12,11 +12,13 @@ import time
 import subprocess
 import multiprocessing as mp
 from threading import Thread, Event
+from PyQt5.QtCore import QThread, pyqtSignal, pyqtSlot
 
 import pyudev
 
 from . import UUID_ROOT, DBDIR, LOG, STREAM
-from .mediaInfo import getTitleInfo
+from .mediaInfo.gui import MainWidget
+from .mediaInfo.utils import getDiscID, loadData
 from .makemkv import makemkvcon
 from .utils import video_utils_outfile, logger_thread
 
@@ -31,7 +33,7 @@ RUNNING.set()
 signal.signal( signal.SIGINT,  lambda *args : RUNNING.clear() )
 signal.signal( signal.SIGTERM, lambda *args : RUNNING.clear() )
 
-class RipperWatchdog(Thread):
+class RipperWatchdog(QThread):
     """
     Main watchdog for disc monitoring/ripping
 
@@ -59,6 +61,8 @@ class RipperWatchdog(Thread):
     from the mounted list and log information that it has been ejected.
 
     """
+
+    MOUNT_SIGNAL = pyqtSignal(str)
 
     def __init__(
         self,
@@ -96,18 +100,12 @@ class RipperWatchdog(Thread):
         """
 
         super().__init__() 
-        self.__log     = logging.getLogger( __name__ )
-        self.__log.debug( "%s started", __name__ )
-    
-        self._outdir = None
-        self.log_queue = mp.Queue()
+        self.__log = logging.getLogger(__name__)
+        self.__log.debug("%s started", __name__)
 
-        self.lp = Thread(
-            target=logger_thread,
-            args=(self.log_queue,),
-        )
-        self.lp.start()
+        self.MOUNT_SIGNAL.connect(self.get_disc_info)
  
+        self._outdir = None
  
         self.dbdir = kwargs.get('dbdir', DBDIR)
         self.outdir = outdir
@@ -174,23 +172,24 @@ class RipperWatchdog(Thread):
                     )
                     continue
                 self.__log.debug('Finished mounting : %s', dev)
-                proc = mp.Process(
-                    target=rip_disc,
-                    args=(
-                        dev,
-                        self.root,
-                        self.outdir,
-                        self.everything,
-                        self.extras,
-                        self.fileGen,
-                    ),
-                    kwargs={
-                        'dbdir': self.dbdir,
-                        'log_queue': self.log_queue,
-                    }, 
-                )
-                proc.start()
-                mounted[dev] = proc 
+                self.MOUNT_SIGNAL.emit(dev)
+                #proc = mp.Process(
+                #    target=rip_disc,
+                #    args=(
+                #        dev,
+                #        self.root,
+                #        self.outdir,
+                #        self.everything,
+                #        self.extras,
+                #        self.fileGen,
+                #    ),
+                #    kwargs={
+                #        'dbdir': self.dbdir,
+                #        'log_queue': self.log_queue,
+                #    }, 
+                #)
+                #proc.start()
+                self._mounted[dev] = None  # proc 
                 continue
 
             # If dev is NOT in mounted, initialize to False
@@ -211,49 +210,76 @@ class RipperWatchdog(Thread):
     def quit(self, *args, **kwargs):
         RUNNING.clear()
 
+    @pyqtSlot(str)
+    def get_disc_info(self, dev):
+#, root, outdir, everything, extras, fileGen, dbdir=None, log_queue=None):
+        """
+        Rip a whole disc
+    
+        Given information about a disc, rip
+        all tracks. Intended to be run as thread
+        so watchdog can keep looking for new discs
+    
+        Arguments:
+            dev (str) : Device to rip from
+            root (str) : Location of the 'by-uuid' directory
+                where discs are mounted. This is used to
+                get the unique ID of the disc.
+            outdir (str) : Directory to save mkv files to
+            extras (bool) : Flag for if should rip extras
+    
+        """
+    
+        uuid = getDiscID(dev, self.root)
+        if uuid is None:
+            return
 
-def rip_disc(dev, root, outdir, everything, extras, fileGen, dbdir=None, log_queue=None):
-    """
-    Rip a whole disc
+        self.__log.info("UUID of disc: %s", uuid)
+        info = loadData(discID=uuid)
+        if len(info) == 0:
+            window = MainWidget(dev, dbdir=self.dbdir)
+            window.finished.connect(self.rip_disc)
+            self._mounted[dev] = window
 
-    Given information about a disc, rip
-    all tracks. Intended to be run as thread
-    so watchdog can keep looking for new discs
+ 
+    @pyqtSlot(int)
+    def rip_disc(self, result):
+#, root, outdir, everything, extras, fileGen, dbdir=None, log_queue=None):
+        """
+        Rip a whole disc
+    
+        Given information about a disc, rip
+        all tracks. Intended to be run as thread
+        so watchdog can keep looking for new discs
+    
+        Arguments:
+            dev (str) : Device to rip from
+            root (str) : Location of the 'by-uuid' directory
+                where discs are mounted. This is used to
+                get the unique ID of the disc.
+            outdir (str) : Directory to save mkv files to
+            extras (bool) : Flag for if should rip extras
+    
+        """
 
-    Arguments:
-        dev (str) : Device to rip from
-        root (str) : Location of the 'by-uuid' directory
-            where discs are mounted. This is used to
-            get the unique ID of the disc.
-        outdir (str) : Directory to save mkv files to
-        extras (bool) : Flag for if should rip extras
-
-    """
-
-    if isinstance(log_queue, mp.queues.Queue):
-        qh = QueueHandler(log_queue)
-        root_log = logging.getLogger()
-        root_log.setLevel(logging.DEBUG)
-        root_log.addHandler(qh)
-
-    log = logging.getLogger(__name__)
-
-    info = getTitleInfo(dev, root, dbdir=dbdir)
-    if info is None:
-        log.error("No title information found/entered : %s", dev)
-        return
-
-    if info != 'skiprip':
-        for title, fpath in fileGen(outdir, info, everything=everything, extras=extras):
-            rip_title(f"dev:{dev}", title, fpath)
-    else:
-        log.info("Just saving metadata, not ripping : %s", dev)
-
-    try:
-        os.system(f"eject {dev}")
-    except:
-        pass
-
+        for key, val in self._mounted.items():
+            print(key, val.info)
+        #info = getTitleInfo(dev, self.root, dbdir=self.dbdir)
+        #if info is None:
+        #    self.__log.error("No title information found/entered : %s", dev)
+        #    return
+    
+        #if info != 'skiprip':
+        #    for title, fpath in fileGen(outdir, info, everything=everything, extras=extras):
+        #        rip_title(f"dev:{dev}", title, fpath)
+        #else:
+        #    self.__log.info("Just saving metadata, not ripping : %s", dev)
+    
+        #try:
+        #    os.system(f"eject {dev}")
+        #except:
+        #    pass
+    
 def rip_title( src, title, outfile ):
     """
     Rip a given title from a disc

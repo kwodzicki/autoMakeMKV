@@ -1,6 +1,8 @@
 import logging
+import sys
 import os
 import json
+import argparse
 
 from PyQt5.QtWidgets import (
     QApplication,
@@ -23,7 +25,7 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtGui import QIcon
 from PyQt5.QtCore import QTimer
 
-from . import HOMEDIR, DBDIR, SETTINGS_FILE
+from . import HOMEDIR, DBDIR, SETTINGS_FILE, LOG, STREAM
 from .ripper import RipperWatchdog, RUNNING
 
 
@@ -284,9 +286,15 @@ def save_settings(settings):
 
      
 def main():
-    import sys
+    parser = argparse.ArgumentParser()
+    parser.add_argument( '--loglevel', type=int, default=30, help='Set logging level')
+    
+    args = parser.parse_args()
+
+    STREAM.setLevel( args.loglevel )
+    LOG.addHandler(STREAM)
+
     app = QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)
     w = SystemTray(app)
     app.exec_()
-

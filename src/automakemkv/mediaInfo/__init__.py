@@ -1,10 +1,9 @@
 import logging
 import os
-import argparse
 
 from .. import STREAM
 from .utils import getDiscID, loadData
-from .gui import main
+from .gui import MainWidget
 
 
 def getTitleInfo(discDev, root, dbdir=None):
@@ -23,10 +22,17 @@ def getTitleInfo(discDev, root, dbdir=None):
 
 
 def cli():
+    import sys
+    import argparse
+    from PyQt5.QtWidgets import QApplication
     parser = argparse.ArgumentParser()
+    parser.add_argument('discdev', type=str)
     parser.add_argument('--debug', action='store_true', help='Set to enable debugging mode')
     parser.add_argument('--loglevel', type=int, default=30, help='Set logging level')
+   
 
     args = parser.parse_args()
     STREAM.setLevel( args.loglevel )
-    x = main( debug=args.debug )
+    app = QApplication(sys.argv)
+    MainWidget(args.discdev)
+    app.exec_()

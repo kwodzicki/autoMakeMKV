@@ -116,6 +116,7 @@ class RipperWatchdog(QThread):
 
         self._mounting = {} 
         self._mounted = {}
+        self._ripping = {}
         self._context = pyudev.Context()
         self._monitor = pyudev.Monitor.from_netlink(self._context)
         self._monitor.filter_by(subsystem='block')
@@ -204,9 +205,6 @@ class RipperWatchdog(QThread):
                 else:
                     self.__log.debug("Exitcode from ripping processes : %d", proc.exitcode)
 
-        self.log_queue.put(None)
-        self.lp.join()
-
     def quit(self, *args, **kwargs):
         RUNNING.clear()
 
@@ -235,16 +233,17 @@ class RipperWatchdog(QThread):
             return
 
         self.__log.info("UUID of disc: %s", uuid)
-        info = loadData(discID=uuid)
+        info, sizes = loadData(discID=uuid)
         if len(info) == 0:
-            window = MainWidget(dev, dbdir=self.dbdir)
-            window.finished.connect(self.rip_disc)
-            self._mounted[dev] = window
-
+            dialog = MainWidget(dev, dbdir=self.dbdir)
+            dialog.finished.connect(self.rip_disc)
+            self._mounted[dev] = dialog
+        else:
+            self._mounted[dev] = (info, sizes)
+            self.rip_disc(0)
  
     @pyqtSlot(int)
     def rip_disc(self, result):
-#, root, outdir, everything, extras, fileGen, dbdir=None, log_queue=None):
         """
         Rip a whole disc
     
@@ -262,24 +261,63 @@ class RipperWatchdog(QThread):
     
         """
 
-        for key, val in self._mounted.items():
-            print(key, val.info)
-        #info = getTitleInfo(dev, self.root, dbdir=self.dbdir)
-        #if info is None:
-        #    self.__log.error("No title information found/entered : %s", dev)
-        #    return
-    
-        #if info != 'skiprip':
-        #    for title, fpath in fileGen(outdir, info, everything=everything, extras=extras):
-        #        rip_title(f"dev:{dev}", title, fpath)
-        #else:
-        #    self.__log.info("Just saving metadata, not ripping : %s", dev)
-    
-        #try:
-        #    os.system(f"eject {dev}")
-        #except:
-        #    pass
-    
+        devs = list(self._mounted.keys())
+        for dev in devs:
+            disc_info = self._mounted.pop(dev, None)
+            if disc_info is None:
+                continue
+   
+            if isinstance(disc_info, tuple):
+                info, sizes = disc_info
+            else:
+                info, sizes = disc_info.info, disc_info.sizes
+            ripper = Ripper(dev, info, sizes, self.fileGen, self.get_settings())
+            ripper.start()
+            self._ripping[dev] = ripper
+
+
+class Ripper(QThread):
+
+    def __init__(self, dev, info, sizes, fileGen, settings):
+        super().__init__()
+        self.__log  = logging.getLogger(__name__)
+        self.dev = dev
+        self.info = info
+        self.sizes = sizes
+        self.fileGen = fileGen
+        self.settings = settings
+
+    def rip(self):
+
+        if self.info is None:
+            self.__log.error("No title information found/entered : %s", self.dev)
+            return
+ 
+        if self.info == 'skiprip':
+            self.__log.info("Just saving metadata, not ripping : %s", self.dev)
+            return
+
+        info = {
+            title: {
+                'path': fpath,
+                'size': self.sizes[title],
+            }
+            for title, fpath in self.fileGen(
+                self.settings['outdir'],
+                self.info,
+                everything=self.settings['everything'],
+                extras=self.settings['extras'],
+            )
+        }
+
+        print(info)
+
+    def run(self):
+        self.rip()
+        subprocess.call(['eject', self.dev]) 
+
+
+     
 def rip_title( src, title, outfile ):
     """
     Rip a given title from a disc

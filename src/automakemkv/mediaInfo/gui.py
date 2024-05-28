@@ -7,25 +7,27 @@ from ..makemkv import MakeMKVThread
 from .utils import DBDIR, checkInfo, getDiscID, loadData, saveData
 
 EXTRATYPES = [ 
-    'behindthescenes', 'deleted', 'featurette',
-    'interview', 'scene', 'short', 'trailer', 'other',
+    'behindthescenes',
+    'deleted',
+    'featurette',
+    'interview',
+    'scene',
+    'short',
+    'trailer',
+    'other',
 ]
 
 MOVIETYPES   = ['edition']
 SERIESTYPES  = ['']
 CONTENTTYPES = ['', 'Movie', 'Series']
 MEDIATYPES   = [
-    'DVD', 'Blu-Ray', '4K Blu-Ray (UHD)',
+    'DVD',
+    'Blu-Ray',
+    '4K Blu-Ray (UHD)',
 ]
 
-def main( discDev='/dev/sr0', **kwargs ):
+SIZEKEY = 'Disk Size (Bytes)'
 
-#    app = QtWidgets.QApplication(['MakeMKV MediaID'])
-    mediaIDs = MainWidget( discDev, **kwargs )
-    mediaIDs.exec_()
-#    app.exec_()
-
-    return mediaIDs.info
 
 class BaseMetadata( QtWidgets.QWidget ):
     """
@@ -416,6 +418,7 @@ class MainWidget(QtWidgets.QDialog):
         self.log = logging.getLogger( __name__ )
         self.curTitle  = None
         self.info      = None
+        self.sizes     = None
         self.discDev   = discDev
         self.discID    = getDiscID( discDev )
         self.dbdir     = dbdir or DBDIR
@@ -492,7 +495,7 @@ class MainWidget(QtWidgets.QDialog):
         action_open.triggered.connect(self.open)
         action_save = QtWidgets.QAction("&Save", self)
         action_save.triggered.connect(self.save)
-        action_quit = QtWidgets.QAction("&Quit", self)
+        action_quit = QtWidgets.QAction("&Cancel", self)
         action_quit.triggered.connect(self.quit) 
 
         file_menu.addAction(action_open)
@@ -503,7 +506,8 @@ class MainWidget(QtWidgets.QDialog):
 
     def quit(self, *args, **kwargs):
         self.loadDisc.kill()
-        self.done(0)
+        self.accept()
+        #self.reject()
 
     def setWindowTitle( self ):
 
@@ -555,16 +559,23 @@ class MainWidget(QtWidgets.QDialog):
             )
 
         titles = {}
-        root   = self.titleTree.invisibleRootItem()
-        for i in range( root.childCount() ):
-            titleObj   = root.child( i )          # Get the object from the QTreeWidget
+        sizes = {}
+        root = self.titleTree.invisibleRootItem()
+        for i in range(root.childCount()):
+            titleObj = root.child(i)  # Get the object from the QTreeWidget
+            print(titleObj.makeMKVInfo)
             if titleObj.checkState(0) == 0:
                 continue
 
-            if not checkInfo( self, titleObj.info ):
+            if not checkInfo(self, titleObj.info):
                 return
 
-            titles.update( { titleObj.titleID : titleObj.info } )
+            titles.update(
+                {titleObj.titleID: titleObj.info},
+            )
+            sizes.update(
+                {titleObj.titleID: int(titleObj.makeMKVInfo.get(SIZEKEY, '0'))},
+            )
 
         if len(titles) == 0:
             self.log.info('No titles marked for ripping!')
@@ -586,7 +597,8 @@ class MainWidget(QtWidgets.QDialog):
         if res == message.Yes:
             saveData(info, discID=self.discID, replace=True, dbdir=self.dbdir)
             self.info = info if kwargs.get('rip', False) else 'skiprip'
-            self.done(0)
+            self.sizes = sizes
+            self.accept()
 
     def selectTitle( self, obj, col ):
         """
@@ -630,7 +642,7 @@ class MainWidget(QtWidgets.QDialog):
 
         self.titleTree.clear()
         discInfo = self.loadDisc.discInfo
-        titles   = self.loadDisc.titles
+        titles = self.loadDisc.titles
         infoTitles = {}
         if info is not None:
             self.discID = info['discID']

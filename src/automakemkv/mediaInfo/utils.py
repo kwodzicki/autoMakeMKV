@@ -1,12 +1,18 @@
 import logging
-
-import os, json
+import os
+import json
+import gzip
+import re
 
 from PyQt5.QtWidgets import QMessageBox
 
 from .. import DBDIR, UUID_ROOT
 
 EXT = '.json'
+TRACKSIZE_AP = 11  # Number used for track size in TINFO from MakeMKV
+TRACKSIZE_REG = re.compile(
+    f"TINFO:(\d+),{TRACKSIZE_AP},\d+,\"(\d+)\"",
+)
 
 def checkInfo( parent, info ):
 
@@ -64,10 +70,20 @@ def loadData( discID=None, fpath=None, dbdir=None ):
 
     log.debug("Path to database file : %s", fpath)
     if not os.path.isfile( fpath ):
-        return {} 
+        return None, None 
 
     with open(fpath, 'r') as fid:
-        return json.load(fid)
+        info = json.load(fid)
+
+    infopath = os.path.splitext(fpath)[0]+'.info.gz'
+    with gzip.open(infopath, 'rt') as fid:
+        data = fid.read()
+
+    sizes = {
+        matchobj.group(1): int(matchobj.group(2))
+        for matchobj in TRACKSIZE_REG.finditer(data)
+    }
+    return info, sizes
 
 def saveData( info, discDev=None, discID=None, fpath=None, replace=False, dbdir=None ):
     """

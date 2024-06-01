@@ -14,7 +14,12 @@ TRACKSIZE_REG = re.compile(
     f"TINFO:(\d+),{TRACKSIZE_AP},\d+,\"(\d+)\"",
 )
 
-def checkInfo( parent, info ):
+
+def checkInfo(parent, info: dict):
+    """
+    Check required disc metadata entered
+
+    """
 
     message = None
     if not info['isMovie'] and not info['isSeries']:
@@ -34,32 +39,65 @@ def checkInfo( parent, info ):
         return True
 
     box = QMessageBox(parent)
-    box.setText( message )
+    box.setText(message)
     box.exec_()
     return False
 
-def getDiscID( discDev, root=UUID_ROOT, **kwargs ):
 
-    for item in os.listdir( root ):
-        path = os.path.join( root, item )
-        src  = os.readlink( path )
-        src  = os.path.abspath( os.path.join(root, src) )
+def getDiscID(discDev: str, root: str = UUID_ROOT, **kwargs) -> str | None:
+    """
+    Find disc UUID
+
+    Argumnets:
+        discDev (str): Full /dev path of disc
+
+    Keyword arguments:
+        root (str): Root path the /dev/disc-by-uuid to determine the UUID of
+            the discDvev
+        kwargs: Others ignored
+
+    Returns:
+        str | None
+
+    """
+
+    for item in os.listdir(root):
+        path = os.path.join(root, item)
+        src = os.readlink(path)
+        src = os.path.abspath(os.path.join(root, src))
         if src == discDev:
             return item
+
     return None
 
-def info_path( discDev, dbdir=None, **kwargs ):
 
-    uuid = getDiscID( discDev, **kwargs )
+def info_path(discDev: str, dbdir: str | None = None, **kwargs) -> str | None:
+    """
+    Get path to MakeMKV info file
+
+    Given "/dev" path to a disc, determine the UUID and build the
+    path to the [uuid].info.gz file
+
+    """
+
+    uuid = getDiscID(discDev, **kwargs)
     if uuid is None:
         return None
 
-    if dbdir is None:
-        dbdir = DBDIR
+    dbdir = dbdir or DBDIR
 
-    return os.path.join( dbdir, f"{uuid}.info.gz" )
+    return os.path.join(dbdir, f"{uuid}.info.gz")
 
-def loadData( discID=None, fpath=None, dbdir=None ):
+
+def loadData(
+    discID: str | None = None,
+    fpath: str | None = None,
+    dbdir: str | None = None,
+) -> tuple:
+    """
+    Load data from given disc or file
+
+    """
 
     log = logging.getLogger(__name__)
     if dbdir is None:
@@ -85,24 +123,34 @@ def loadData( discID=None, fpath=None, dbdir=None ):
     }
     return info, sizes
 
-def saveData( info, discDev=None, discID=None, fpath=None, replace=False, dbdir=None ):
+
+def saveData(
+    info: dict,
+    discDev: str | None = None,
+    discID: str | None = None,
+    fpath: str | None = None,
+    replace: bool = False,
+    dbdir: str | None = None,
+) -> bool:
     """
+    Save disc metadata to JSON file
+
     Arguments:
+        info (dict) : Information from GUI about what tracks/titles to rip
+
+    Keyword argumnets:
         discID (str) : Unique disc ID
-        info (dict) : Information from GUI about what
-            tracks/titles to rip
 
     """
 
-    if dbdir is None:
-        dbdir = DBDIR
+    dbdir = dbdir or DBDIR
 
     if fpath is None:
         if discDev is not None:
-            discID = getDiscID( discDev )
-        fpath = os.path.join( dbdir, f"{discID}{EXT}" )
+            discID = getDiscID(discDev)
+        fpath = os.path.join(dbdir, f"{discID}{EXT}")
 
-    if os.path.isfile( fpath ) and not replace:
+    if os.path.isfile(fpath) and not replace:
         return False
 
     info['discID'] = discID

@@ -19,19 +19,20 @@ import pyudev
 from . import UUID_ROOT, DBDIR, LOG, STREAM
 from .mediaInfo.gui import MainWidget
 from .mediaInfo.utils import getDiscID, loadData
-from .makemkv import makemkvcon
+from .makemkv import makemkvcon, MakeMKVConLog
 from .utils import video_utils_outfile, logger_thread
 
-KEY     = 'DEVNAME'
-CHANGE  = 'DISK_MEDIA_CHANGE'
-STATUS  = "ID_CDROM_MEDIA_STATE"
+KEY = 'DEVNAME'
+CHANGE = 'DISK_MEDIA_CHANGE'
+STATUS = "ID_CDROM_MEDIA_STATE"
 TIMEOUT = 10.0
+SIZE_POLL = 10
 
 RUNNING = Event()
-RUNNING.set()
 
-signal.signal( signal.SIGINT,  lambda *args : RUNNING.clear() )
-signal.signal( signal.SIGTERM, lambda *args : RUNNING.clear() )
+signal.signal(signal.SIGINT, lambda *args : RUNNING.set())
+signal.signal(signal.SIGTERM, lambda *args : RUNNING.set())
+
 
 class RipperWatchdog(QThread):
     """
@@ -71,6 +72,7 @@ class RipperWatchdog(QThread):
         extras=False,
         root=UUID_ROOT,
         fileGen=video_utils_outfile,
+        progress_dialog=None,
         **kwargs,
     ):
         """
@@ -113,10 +115,10 @@ class RipperWatchdog(QThread):
         self.extras = extras
         self.root = root
         self.fileGen = fileGen
+        self.progress_dialog = progress_dialog
 
         self._mounting = {} 
         self._mounted = {}
-        self._ripping = {}
         self._context = pyudev.Context()
         self._monitor = pyudev.Monitor.from_netlink(self._context)
         self._monitor.filter_by(subsystem='block')
@@ -124,6 +126,7 @@ class RipperWatchdog(QThread):
     @property
     def outdir(self):
         return self._outdir
+
     @outdir.setter
     def outdir(self, val):
         #os.makedirs(val, exist_ok=True)
@@ -152,9 +155,16 @@ class RipperWatchdog(QThread):
         }
 
     def run(self):
+        """
+        Processing for thread
+
+        Polls udev for device changes, running MakeMKV pipelines when dvd/bluray
+        found
+
+        """
 
         self.__log.info('Watchdog thread started')
-        while RUNNING.is_set():
+        while not RUNNING.is_set():
             device = self._monitor.poll(timeout=1.0)
             if device is None:
                 continue
@@ -174,71 +184,58 @@ class RipperWatchdog(QThread):
                     continue
                 self.__log.debug('Finished mounting : %s', dev)
                 self.MOUNT_SIGNAL.emit(dev)
-                #proc = mp.Process(
-                #    target=rip_disc,
-                #    args=(
-                #        dev,
-                #        self.root,
-                #        self.outdir,
-                #        self.everything,
-                #        self.extras,
-                #        self.fileGen,
-                #    ),
-                #    kwargs={
-                #        'dbdir': self.dbdir,
-                #        'log_queue': self.log_queue,
-                #    }, 
-                #)
-                #proc.start()
-                self._mounted[dev] = None  # proc 
+                self._mounted[dev] = None 
                 continue
 
             # If dev is NOT in mounted, initialize to False
             if dev not in self._mounted:
                 self.__log.info('Odd event : %s', dev)
-            else:
-                self.__log.info('Device has been ejected : %s', dev)
-                proc = self._mounted.pop(dev)
-                if proc.is_alive():
-                    self.__log.warning('Killing the ripper process!')
-                    proc.terminate()
-                else:
-                    self.__log.debug("Exitcode from ripping processes : %d", proc.exitcode)
+                continue
+
+            self.__log.info('Device has been ejected : %s', dev)
+            proc = self._mounted.pop(dev)
+            if proc.is_alive():
+                self.__log.warning('Killing the ripper process!')
+                proc.kill()
+                continue
+
+            self.__log.debug(
+                "Exitcode from ripping processes : %d",
+                proc.exitcode,
+            )
 
     def quit(self, *args, **kwargs):
-        RUNNING.clear()
+        RUNNING.set()
 
     @pyqtSlot(str)
     def get_disc_info(self, dev):
-#, root, outdir, everything, extras, fileGen, dbdir=None, log_queue=None):
         """
-        Rip a whole disc
+        Get information about a disc 
     
-        Given information about a disc, rip
-        all tracks. Intended to be run as thread
-        so watchdog can keep looking for new discs
+        Given the /dev path to a disc, load information from database if it exists or
+        open GUI for user to input information
     
         Arguments:
             dev (str) : Device to rip from
-            root (str) : Location of the 'by-uuid' directory
-                where discs are mounted. This is used to
-                get the unique ID of the disc.
-            outdir (str) : Directory to save mkv files to
-            extras (bool) : Flag for if should rip extras
     
         """
     
+        # Attept to get UUID of disc
         uuid = getDiscID(dev, self.root)
         if uuid is None:
+            self.__log.info("No UUID found for disc: %s", dev)
             return
 
+        # Get title informaiton for tracks to rip
         self.__log.info("UUID of disc: %s", uuid)
         info, sizes = loadData(discID=uuid)
-        if len(info) == 0:
+        if info is None:
+            # Open dics metadata GUI and register "callback" for when closes
             dialog = MainWidget(dev, dbdir=self.dbdir)
             dialog.finished.connect(self.rip_disc)
             self._mounted[dev] = dialog
         else:
+            # Update mounted information and run rip_disc
             self._mounted[dev] = (info, sizes)
             self.rip_disc(0)
  
@@ -261,117 +258,174 @@ class RipperWatchdog(QThread):
     
         """
 
+        # Get list of keys for mounted devices, then iterate over them
         devs = list(self._mounted.keys())
         for dev in devs:
+            # Try to pop of information
             disc_info = self._mounted.pop(dev, None)
             if disc_info is None:
                 continue
-   
+  
+            # If the disc_info is a tuple, then directly has information, else grab
+            # from object attributes 
             if isinstance(disc_info, tuple):
                 info, sizes = disc_info
             else:
                 info, sizes = disc_info.info, disc_info.sizes
-            ripper = Ripper(dev, info, sizes, self.fileGen, self.get_settings())
+
+            # Initialize ripper object
+            ripper = Ripper(
+                dev, 
+                info,
+                sizes,
+                self.fileGen,
+                self.get_settings(),
+                progress=self.progress_dialog,
+            )
             ripper.start()
-            self._ripping[dev] = ripper
+            self._mounted[dev] = ripper
 
 
 class Ripper(QThread):
 
-    def __init__(self, dev, info, sizes, fileGen, settings):
+    def __init__(self, dev, info, sizes, fileGen, settings, progress=None):
         super().__init__()
-        self.__log  = logging.getLogger(__name__)
+        self.log  = logging.getLogger(__name__)
         self.dev = dev
         self.info = info
         self.sizes = sizes
         self.fileGen = fileGen
         self.settings = settings
+        self.progress = progress
 
-    def rip(self):
+        self.logthread = None
+
+    def rip_disc(self):
 
         if self.info is None:
-            self.__log.error("No title information found/entered : %s", self.dev)
+            self.log.error("No title information found/entered : %s", self.dev)
             return
  
         if self.info == 'skiprip':
-            self.__log.info("Just saving metadata, not ripping : %s", self.dev)
+            self.log.info("Just saving metadata, not ripping : %s", self.dev)
             return
+
+        filegen = self.fileGen(
+            self.settings['outdir'],
+            self.info,
+            everything=self.settings['everything'],
+            extras=self.settings['extras'],
+        )
 
         info = {
             title: {
                 'path': fpath,
                 'size': self.sizes[title],
             }
-            for title, fpath in self.fileGen(
-                self.settings['outdir'],
-                self.info,
-                everything=self.settings['everything'],
-                extras=self.settings['extras'],
-            )
+            for title, fpath in filegen
         }
 
-        print(info)
+        if self.progress is not None:
+            self.log.info('Emitting add disc signal')
+            self.progress.ADD_DISC.emit(self.dev, info)
+
+        for title, info in info.items():
+            self.rip_title(title, info['path'])
+
+    def rip_title(self, title, outfile):
+        """
+        Rip a given title from a disc
+    
+        Rip a title from the given disc to 
+        a specific output file.
+    
+        Arguments:
+            title (str) : Title to rip
+            outfile (str) : Name of the output file
+    
+        Returns:
+            bool : True if ripped, False otherwise
+    
+        """
+    
+        outdir = os.path.dirname( outfile )
+        if not os.path.isdir( outdir ):
+            os.makedirs( outdir )
+    
+        tmpdir = os.path.splitext(
+            os.path.basename(outfile),
+        )[0]
+        tmpdir = os.path.join(outdir, tmpdir)
+        self.log.debug("Creating temporary directory : '%s'", tmpdir)
+        os.makedirs(tmpdir, exist_ok=True)
+    
+        if self.progress is not None:
+            self.progress.CUR_TRACK.emit(self.dev, title)
+    
+        self.log.info("[%s - %s] Ripping track", self.dev, title)
+        #proc = makemkvcon('mkv', self.dev, title, tmpdir, noscan=True, minlength=0)
+        self.logthread = MakeMKVConLog(
+            'mkv',
+            f"dev:{self.dev}",
+            title,
+            tmpdir,
+            noscan=True,
+            minlength=0,
+        )
+        self.logthread.start()
+
+        while not RUNNING.wait(timeout=SIZE_POLL) and self.logthread.is_alive():
+            if self.progress is None:
+                continue
+            self.progress.TRACK_SIZE.emit(self.dev, directory_size(tmpdir))
+    
+        if RUNNING.is_set():
+            self.logthread.kill()
+            self.logthread.join()
+            return
+    
+        files = [
+            os.path.join(tmpdir, item) for item in os.listdir(tmpdir)
+        ]
+    
+        status = False
+        if self.logthread.returncode != 0:
+            for fname in files:
+                os.remove(fname)
+            self.log.error("Error ripping track '%s' from '%s'", title, self.dev)
+        elif len(files) != 1:
+            self.log.error('Too many output files!')
+            for fname in files:
+                os.remove( fname )
+        else:
+            self.log.info("Renaming file '%s' ---> '%s'", files[0], outfile)
+            os.rename( files[0], outfile )
+            status = True
+    
+        os.rmdir( tmpdir )
+    
+        return status
 
     def run(self):
-        self.rip()
+        self.rip_disc()
         subprocess.call(['eject', self.dev]) 
 
+    def kill(self):
+        if self.logthread is None:
+            return
+        self.logthread.kill()
 
-     
-def rip_title( src, title, outfile ):
+def directory_size(path):
     """
-    Rip a given title from a disc
-
-    Rip a title from the given disc to 
-    a specific output file.
-
-    Arguments:
-        src (str) : Source disc
-        title (str) : Title to rip
-        outfile (str) : Name of the output file
-
-    Returns:
-        bool : True if ripped, False otherwise
+    Get size of all files in directory
 
     """
 
-    log    = logging.getLogger(__name__)
-    outdir = os.path.dirname( outfile )
-    if not os.path.isdir( outdir ):
-        os.makedirs( outdir )
-
-    tmpdir = os.path.splitext( os.path.basename( outfile ) )[0]
-    tmpdir = os.path.join( outdir, tmpdir )
-    log.debug( "Creating temporary directory : '%s'", tmpdir )
-    os.makedirs( tmpdir, exist_ok=True )
-
-    baselog = f"[{src} - {title}]"
-    log.info( "%s Ripping track", baselog )
-    proc = makemkvcon('mkv', src, title, tmpdir, noscan=True, minlength=0)
-    for line in iter(proc.stdout.readline, ''):
-        log.info( "%s %s", baselog, line.rstrip() )
-    proc.communicate()
-    files = [
-        os.path.join(tmpdir, item) for item in os.listdir(tmpdir)
-    ]
-
-    status = False
-    if proc.returncode != 0:
-        for fname in files:
-            os.remove(fname)
-        log.error( "Error ripping track '%s' from '%s'", title, src )
-    elif len(files) != 1:
-        log.error( 'Too many output files!' )
-        for fname in files:
-            os.remove( fname )
-    else:
-        log.info( "Renaming file '%s' ---> '%s'", files[0], outfile )
-        os.rename( files[0], outfile )
-        status = True
-
-    os.rmdir( tmpdir )
-
-    return status
+    return sum(
+        d.stat().st_size
+        for d in os.scandir(path)
+        if d.is_file()
+    )
 
 
 def cli():

@@ -19,6 +19,7 @@ from PyQt5.QtCore import QTimer
 from .. import LOG, STREAM
 from ..ripper import RipperWatchdog, RUNNING
 
+from .progress import ProgressDialog
 from .widgets import (
     MissingOutdirDialog,
     SettingsWidget,
@@ -54,13 +55,13 @@ class SystemTray(QSystemTrayIcon):
         self._menu.addAction( self._label )
 
         self._menu.addSeparator()
-        self._show_status = QAction('Show Progress')
-        self._show_status.setToolTip(
+        self._progress = QAction('Show Progress')
+        self._progress.setToolTip(
             "Opens a dialog window to show status of rip(s). "
             "The window will close once rip(s) is complete."
         )
-        self._show_status.setCheckable(True)
-        self._menu.addAction(self._show_status)
+        self._progress.setCheckable(True)
+        self._menu.addAction(self._progress)
 
         self._settings = QAction( 'Settings' )
         self._settings.triggered.connect( self.settings_widget )
@@ -77,10 +78,14 @@ class SystemTray(QSystemTrayIcon):
         self.setVisible(True) 
         
         settings = load_settings()
-        self._show_status.setChecked(
-            settings.get('show_status', True)
+        self._progress.setChecked(
+            settings.get('progress', True)
         )
-        self.ripper = RipperWatchdog(**settings)
+        self.progress = ProgressDialog()
+        self.ripper = RipperWatchdog(
+            progress_dialog=self.progress,
+            **settings,
+        )
         self.ripper.start()
 
         # Set up check of output directory exists to run right after event loop starts
@@ -105,7 +110,7 @@ class SystemTray(QSystemTrayIcon):
 
         settings = {
             **self.ripper.get_settings(),
-            'show_status': self._show_status.isChecked(),
+            'progress': self._progress.isChecked(),
         }
         save_settings(settings)
 

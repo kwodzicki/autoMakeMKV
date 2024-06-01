@@ -3,7 +3,7 @@ import os
 
 from PyQt5 import QtCore, QtWidgets, QtGui, Qt
 
-from ..makemkv import MakeMKVThread
+from ..makemkv import MakeMKVInfo
 from .utils import DBDIR, checkInfo, getDiscID, loadData, saveData
 
 EXTRATYPES = [ 
@@ -477,7 +477,7 @@ class MainWidget(QtWidgets.QDialog):
         self.setLayout(layout)
         self.resize( 720, 720 )
 
-        self.loadDisc = MakeMKVThread( discDev, debug=debug, dbdir=self.dbdir )
+        self.loadDisc = MakeMKVInfo(discDev, debug=debug, dbdir=self.dbdir)
         self.loadDisc.signal.connect( self.msgs.append )
         self.loadDisc.finished.connect( self.buildTitleTree )
         self.loadDisc.start()
@@ -505,7 +505,7 @@ class MainWidget(QtWidgets.QDialog):
         return menu_bar
 
     def quit(self, *args, **kwargs):
-        self.loadDisc.kill()
+        self.loadDisc.quit()
         self.accept()
         #self.reject()
 

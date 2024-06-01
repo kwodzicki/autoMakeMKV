@@ -19,7 +19,7 @@ import pyudev
 from . import UUID_ROOT, DBDIR, LOG, STREAM
 from .mediaInfo.gui import MainWidget
 from .mediaInfo.utils import getDiscID, loadData
-from .makemkv import makemkvcon, MakeMKVConLog
+from .makemkv import MakeMKVRip
 from .utils import video_utils_outfile, logger_thread
 
 KEY = 'DEVNAME'
@@ -363,25 +363,23 @@ class Ripper(QThread):
             self.progress.CUR_TRACK.emit(self.dev, title)
     
         self.log.info("[%s - %s] Ripping track", self.dev, title)
-        #proc = makemkvcon('mkv', self.dev, title, tmpdir, noscan=True, minlength=0)
-        self.logthread = MakeMKVConLog(
-            'mkv',
-            f"dev:{self.dev}",
+        self.mkv_thread = MakeMKVRip(
+            self.dev,
             title,
             tmpdir,
             noscan=True,
             minlength=0,
         )
-        self.logthread.start()
+        self.mkv_thread.start()
 
-        while not RUNNING.wait(timeout=SIZE_POLL) and self.logthread.is_alive():
+        while not RUNNING.wait(timeout=SIZE_POLL) and self.mkv_thread.isRunning():
             if self.progress is None:
                 continue
             self.progress.TRACK_SIZE.emit(self.dev, directory_size(tmpdir))
     
         if RUNNING.is_set():
-            self.logthread.kill()
-            self.logthread.join()
+            self.mkv_thread.quit()
+            self.mkv_thread.wait()
             return
     
         files = [
@@ -389,7 +387,7 @@ class Ripper(QThread):
         ]
     
         status = False
-        if self.logthread.returncode != 0:
+        if self.mkv_thread.returncode != 0:
             for fname in files:
                 os.remove(fname)
             self.log.error("Error ripping track '%s' from '%s'", title, self.dev)
@@ -411,9 +409,9 @@ class Ripper(QThread):
         subprocess.call(['eject', self.dev]) 
 
     def kill(self):
-        if self.logthread is None:
+        if self.mkv_thread is None:
             return
-        self.logthread.kill()
+        self.mkv_thread.quit()
 
 def directory_size(path):
     """

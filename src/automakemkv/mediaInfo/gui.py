@@ -28,6 +28,11 @@ MEDIATYPES   = [
 
 SIZEKEY = 'Disk Size (Bytes)'
 
+SAVE = 2
+OPEN = 1
+IGNORE = 0
+
+
 
 class BaseMetadata( QtWidgets.QWidget ):
     """
@@ -689,4 +694,81 @@ class MainWidget(QtWidgets.QDialog):
         self.save_but.setEnabled( True )  # Enable 'Apply' Button after the tree is populated
         self.rip_but.setEnabled( True )  # Enable 'Apply' Button after the tree is populated
 
+
+class ExistingDiscOptions(QtWidgets.QDialog):
+    """
+    Dialog with timeout for discs in database
+
+    When a disc is inserted, a check is done to see if the disc
+    exisis in the disc database. If the disc does exist, this
+    dialog should be shown to give the use some options for what
+    to do; save/rip the disc, open the disc metadata for editing,
+    or just ignore the disc all together.
+
+    To enable user-less interaction, however, the dialog has a
+    timeout feature that automatically selects save/rip disc
+    after a certain amount of time. This way, the user can
+    just insert discs and forget about them (assuming they are in
+    the database) or do other things.
+
+    """
+
+    def __init__(self, parent=None, timeout=30):
+        super().__init__(parent)
+        
+        self._timeout = timeout 
+        qbtn = (
+            QtWidgets.QDialogButtonBox.Save
+            | QtWidgets.QDialogButtonBox.Open
+            | QtWidgets.QDialogButtonBox.Ignore
+        )
+        self.button_box = QtWidgets.QDialogButtonBox(qbtn)
+        self.button_box.clicked.connect(self.action)
+
+        message = (
+            "The inserted disc has been found in the database.\n"
+            "Would you like to:\n\n"
+            "\tSave: Rip titles to computer (default)\n"
+            "\tOpen: Open the disc metadata for editing.\n"
+            "\tIgnore: Ignore the disc and do nothing?\n"
+        )
+
+        self.timeout_fmt = "Disc will begin ripping in: {:>4d} seconds"
+        self.timeout_label = QtWidgets.QLabel(
+            self.timeout_fmt.format(self._timeout)
+        )
+
+        layout = QtWidgets.QVBoxLayout()
+        layout.addWidget(
+            QtWidgets.QLabel(message)
+        )
+        layout.addWidget(self.timeout_label)
+        layout.addWidget(self.button_box)
+
+        self.setLayout(layout)
+
+        self._timer = QtCore.QTimer()
+        self._timer.timeout.connect(self._message_timeout)
+        self._timer.start(1000)
+        self.open()
+
+    def _message_timeout(self):
+        self._timeout -= 1
+        if self._timeout > 0:
+            self.timeout_label.setText(
+                self.timeout_fmt.format(self._timeout)
+            )
+            return
+        self._timer.stop()
+        self.done(SAVE)
+
+    def action(self, button):
+        self._timer.stop()
+        if button == self.button_box.button(QtWidgets.QDialogButtonBox.Save):
+            self.done(SAVE)
+            return
+        if button == self.button_box.button(QtWidgets.QDialogButtonBox.Open):
+            self.done(OPEN)
+            return
+        self.done(IGNORE)
 

@@ -17,7 +17,7 @@ from PyQt5.QtCore import QThread, pyqtSignal, pyqtSlot
 import pyudev
 
 from . import UUID_ROOT, DBDIR, LOG, STREAM
-from .mediaInfo.gui import MainWidget
+from .mediaInfo.gui import MainWidget, ExistingDiscOptions
 from .mediaInfo.utils import getDiscID, loadData
 from .makemkv import MakeMKVRip
 from .utils import video_utils_outfile, logger_thread
@@ -234,10 +234,12 @@ class RipperWatchdog(QThread):
             dialog = MainWidget(dev, dbdir=self.dbdir)
             dialog.finished.connect(self.rip_disc)
             self._mounted[dev] = dialog
-        else:
-            # Update mounted information and run rip_disc
-            self._mounted[dev] = (info, sizes)
-            self.rip_disc(0)
+            return
+
+        # Update mounted information and run rip_disc
+        self._mounted[dev] = (info, sizes)
+        self.options_dialog = ExistingDiscOptions()
+        self.options_dialog.finished.connect(self.rip_disc)
  
     @pyqtSlot(int)
     def rip_disc(self, result):
@@ -257,7 +259,8 @@ class RipperWatchdog(QThread):
             extras (bool) : Flag for if should rip extras
     
         """
-
+        print(result)
+        return
         # Get list of keys for mounted devices, then iterate over them
         devs = list(self._mounted.keys())
         for dev in devs:

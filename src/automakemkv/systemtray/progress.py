@@ -10,7 +10,6 @@ from PyQt5.QtWidgets import (
     QFrame,
 )
 from PyQt5.QtCore import QTimer, pyqtSlot, pyqtSignal
-#from PyQt5.QtGui import QFrame
 
 MEGABYTE = 10**6
 
@@ -33,7 +32,7 @@ class ProgressDialog(QWidget):
 
         self.ADD_DISC.connect(self.add_disc)
         self.REMOVE_DISC.connect(self.remove_disc)
-        self.CUR_TRACK.connect(self.cur_track)
+        self.CUR_TRACK.connect(self.current_track)
         self.TRACK_SIZE.connect(self.track_size)
 
     def __len__(self):
@@ -58,12 +57,12 @@ class ProgressDialog(QWidget):
             self.setVisible(False)
 
     @pyqtSlot(str, str)
-    def cur_track(self, dev: str, title: str):
+    def current_track(self, dev: str, title: str):
         self.log.debug("Setting current track: %s - %s", dev, title)
         widget = self.widgets.get(dev, None)
         if widget is None:
             return
-        widget.cur_track(title)
+        widget.current_track(title)
 
     @pyqtSlot(str, int)
     def track_size(self, dev, tsize):
@@ -93,13 +92,12 @@ class ProgressWidget(QFrame):
         self.setLineWidth(1)
 
         self.info = info
-        self.cur_title = None
+        self.current_title = None
         self.n_titles = 0
         self.title_sizes = []
         tot_size = scale_mb(
             sum(t.get('size', 0) for t in info.values())
         )
-
 
         self.title = QLabel(f"Disc: {dev}") 
         self.track_label = QLabel('')
@@ -124,7 +122,7 @@ class ProgressWidget(QFrame):
     def __len__(self):
         return len(self.info)
 
-    def cur_track(self, title: str):
+    def current_track(self, title: str):
         """
         Update current track index
 
@@ -135,13 +133,13 @@ class ProgressWidget(QFrame):
 
         """
 
-        # If the cur_title is not None, then refers to previously processed track and
+        # If the current_title is not None, then refers to previously processed track and
         # must update the total size of that track to be maximum size of the track
-        if self.cur_title is not None:
-            self.title_sizes[-1] = scale_mb(
+        if self.current_title is not None:
+            self.title_sizes[-1] = (
                 self
                 .info
-                .get(self.cur_title, {})
+                .get(self.current_title, {})
                 .get('size', 0)
             )
 
@@ -167,7 +165,7 @@ class ProgressWidget(QFrame):
             scale_mb(self.info.get(title, {}).get('size', 0)),
         )
         self.track_prog.setValue(0)
-        self.cur_title = title
+        self.current_title = title
 
     def track_size(self, tsize):
         """
@@ -189,6 +187,16 @@ class ProgressWidget(QFrame):
         )
 
 
-def scale_mb(val):
+def scale_mb(val: int) -> int:
+    """
+    Convert bytes value to megabytes
+
+    Arguments:
+        val (int): Size in bytes
+
+    Returns:
+        int: size in megabytes rounded up
+
+    """
 
     return val // MEGABYTE + 1

@@ -349,3 +349,32 @@ def logger_thread(q):
             break
         logger = logging.getLogger(record.name)
         logger.handle(record)
+
+
+def get_vendor_model(path):
+    """
+    Get the vendor and model of drive
+
+    """
+
+    path = os.path.join(
+        '/sys/class/block/',
+        os.path.basename(path),
+        'device',
+    )
+
+    vendor = os.path.join(path, 'vendor')
+    if os.path.isfile(vendor):
+        with open(vendor, mode='r') as iid:
+            vendor = iid.read()
+    else:
+        vendor = ''
+
+    model = os.path.join(path, 'model')
+    if os.path.isfile(model):
+        with open(model, mode='r') as iid:
+            model = iid.read()
+    else:
+        model = ''
+
+    return vendor.strip(), model.strip()

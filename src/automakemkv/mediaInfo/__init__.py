@@ -3,7 +3,7 @@ import os
 
 from .. import STREAM
 from .utils import getDiscID, loadData
-from .gui import MainWidget
+from .gui import DiscDialog
 
 
 def getTitleInfo(discDev, root, dbdir=None):
@@ -14,7 +14,7 @@ def getTitleInfo(discDev, root, dbdir=None):
 
     log.info("UUID of disc: %s", uuid)
 
-    info = loadData(discID=uuid)
+    info, _ = loadData(discID=uuid)
     if len(info) == 0:
         info = main(discDev, dbdir=dbdir)
 
@@ -34,5 +34,5 @@ def cli():
     args = parser.parse_args()
     STREAM.setLevel( args.loglevel )
     app = QApplication(sys.argv)
-    MainWidget(args.discdev)
+    DiscDialog(args.discdev)
     app.exec_()

@@ -8,7 +8,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "automakemkv"
-version = "0.7.4"
+version = "0.7.5"
 description = "Package for automagically ripping media with MakeMKV"
 readme = "README.md"
 authors = [
@@ -41,15 +41,3 @@ autoMakeMKV_tray = "automakemkv.systemtray.main:cli"
 [tool.setuptools.packages.find]
 where = ["src"]
 
-#        name                 = NAME,
-#        description          = DESC,
-#        url                  = URL,
-#        author               = AUTH,
-#        author_email         = EMAIL,
-#        version              = main_ns['__version__'],
-#        packages             = find_packages(),
-#        include_package_data = True,
-#        install_requires     = [ 'PyQt5', 'pyudev' ],
-#        scripts              = ['bin/autoMakeMKV', 'bin/autoMakeMKV_gui'],
-#        zip_safe             = False
-#    )

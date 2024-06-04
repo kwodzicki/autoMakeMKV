@@ -89,6 +89,14 @@ def info_path(discDev: str, dbdir: str | None = None, **kwargs) -> str | None:
     return os.path.join(dbdir, f"{uuid}.info.gz")
 
 
+def file_from_discid(discid: str, dbdir: str | None = None):
+
+    return os.path.join(
+        dbdir or DBDIR,
+        f"{discid}{EXT}",
+    )
+
+
 def loadData(
     discID: str | None = None,
     fpath: str | None = None,
@@ -100,11 +108,10 @@ def loadData(
     """
 
     log = logging.getLogger(__name__)
-    if dbdir is None:
-        dbdir = DBDIR
+    dbdir = dbdir or DBDIR
 
     if fpath is None:
-        fpath = os.path.join( dbdir, f"{discID}{EXT}" )
+        fpath = file_from_discid(discID, dbdir)
 
     log.debug("Path to database file : %s", fpath)
     if not os.path.isfile( fpath ):

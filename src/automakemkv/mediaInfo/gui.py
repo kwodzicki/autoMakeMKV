@@ -4,7 +4,7 @@ import os
 from PyQt5 import QtCore, QtWidgets, QtGui, Qt
 
 from ..makemkv import MakeMKVInfo
-from .utils import DBDIR, checkInfo, getDiscID, loadData, saveData
+from .utils import DBDIR, checkInfo, getDiscID, loadData, saveData, file_from_discid
 
 EXTRATYPES = [ 
     'behindthescenes',
@@ -28,6 +28,7 @@ MEDIATYPES   = [
 
 SIZEKEY = 'Disk Size (Bytes)'
 
+RIP = 3
 SAVE = 2
 OPEN = 1
 IGNORE = 0
@@ -411,12 +412,19 @@ class TitleMetadata( BaseMetadata ):
 
         self.extra.addItems( EXTRATYPES )
             
-#class MainWidget(QtWidgets.QMainWindow):
-class MainWidget(QtWidgets.QDialog):
+class DiscDialog(QtWidgets.QDialog):
 
     default_title = 'Title'
 
-    def __init__(self, discDev, *args, debug=False, dbdir=None, **kwargs ):
+    def __init__(
+        self,
+        discDev,
+        *args,
+        debug=False,
+        dbdir=None,
+        discid: str | None = None,
+        **kwargs,
+    ):
 
         super().__init__(*args, **kwargs)
 
@@ -485,7 +493,14 @@ class MainWidget(QtWidgets.QDialog):
         self.loadDisc = MakeMKVInfo(discDev, debug=debug, dbdir=self.dbdir)
         self.loadDisc.signal.connect( self.msgs.append )
         self.loadDisc.finished.connect( self.buildTitleTree )
-        self.loadDisc.start()
+        if discid is not None:
+            path = file_from_discid(discid, dbdir=self.dbdir)
+            self.loadDisc.loadFile(json=path)
+            self.buildTitleTree(
+                *loadData(discID=discid, dbdir=self.dbdir)
+            )
+        else:
+            self.loadDisc.start()
 
         self.show()
 
@@ -538,8 +553,10 @@ class MainWidget(QtWidgets.QDialog):
             return
 
         self.msgs.clear()
-        self.loadDisc.loadFile( json=files[0] )
-        self.buildTitleTree( loadData( fpath=files[0] ) ) 
+        self.loadDisc.loadFile(json=files[0])
+        self.buildTitleTree(
+            *loadData(fpath=files[0])
+        )
 
     def save( self, *args, **kwargs ):
         """
@@ -568,7 +585,6 @@ class MainWidget(QtWidgets.QDialog):
         root = self.titleTree.invisibleRootItem()
         for i in range(root.childCount()):
             titleObj = root.child(i)  # Get the object from the QTreeWidget
-            print(titleObj.makeMKVInfo)
             if titleObj.checkState(0) == 0:
                 continue
 
@@ -601,9 +617,9 @@ class MainWidget(QtWidgets.QDialog):
         )
         if res == message.Yes:
             saveData(info, discID=self.discID, replace=True, dbdir=self.dbdir)
-            self.info = info if kwargs.get('rip', False) else 'skiprip'
+            self.info = info
             self.sizes = sizes
-            self.accept()
+            self.done(RIP if kwargs.get('rip', False) else SAVE)
 
     def selectTitle( self, obj, col ):
         """
@@ -643,7 +659,7 @@ class MainWidget(QtWidgets.QDialog):
              
         self.titleMetadata.setInfo( obj.info )                      # Update the titleMetadata pane with information from actual current title
 
-    def buildTitleTree( self, info=None ):
+    def buildTitleTree(self, info=None, sizes=None):
 
         self.titleTree.clear()
         discInfo = self.loadDisc.discInfo
@@ -760,12 +776,12 @@ class ExistingDiscOptions(QtWidgets.QDialog):
             )
             return
         self._timer.stop()
-        self.done(SAVE)
+        self.done(RIP)
 
     def action(self, button):
         self._timer.stop()
         if button == self.button_box.button(QtWidgets.QDialogButtonBox.Save):
-            self.done(SAVE)
+            self.done(RIP)
             return
         if button == self.button_box.button(QtWidgets.QDialogButtonBox.Open):
             self.done(OPEN)

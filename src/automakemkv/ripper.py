@@ -17,15 +17,14 @@ from PyQt5.QtCore import QThread, pyqtSignal, pyqtSlot
 import pyudev
 
 from . import UUID_ROOT, DBDIR, LOG, STREAM
-from .mediaInfo.gui import MainWidget, ExistingDiscOptions
+from .mediaInfo.gui import DiscDialog, ExistingDiscOptions, RIP, SAVE, OPEN, IGNORE
 from .mediaInfo.utils import getDiscID, loadData
 from .makemkv import MakeMKVRip
-from .utils import video_utils_outfile, logger_thread
+from .utils import video_utils_outfile, logger_thread, get_vendor_model
 
 KEY = 'DEVNAME'
 CHANGE = 'DISK_MEDIA_CHANGE'
 STATUS = "ID_CDROM_MEDIA_STATE"
-TIMEOUT = 10.0
 SIZE_POLL = 10
 
 RUNNING = Event()
@@ -231,18 +230,16 @@ class RipperWatchdog(QThread):
         info, sizes = loadData(discID=uuid)
         if info is None:
             # Open dics metadata GUI and register "callback" for when closes
-            dialog = MainWidget(dev, dbdir=self.dbdir)
-            dialog.finished.connect(self.rip_disc)
-            self._mounted[dev] = dialog
+            self.disc_dialog(dev)
             return
 
         # Update mounted information and run rip_disc
         self._mounted[dev] = (info, sizes)
         self.options_dialog = ExistingDiscOptions()
-        self.options_dialog.finished.connect(self.rip_disc)
+        self.options_dialog.finished.connect(self.handle_disc_info)
  
     @pyqtSlot(int)
-    def rip_disc(self, result):
+    def handle_disc_info(self, result):
         """
         Rip a whole disc
     
@@ -259,8 +256,7 @@ class RipperWatchdog(QThread):
             extras (bool) : Flag for if should rip extras
     
         """
-        print(result)
-        return
+
         # Get list of keys for mounted devices, then iterate over them
         devs = list(self._mounted.keys())
         for dev in devs:
@@ -268,25 +264,58 @@ class RipperWatchdog(QThread):
             disc_info = self._mounted.pop(dev, None)
             if disc_info is None:
                 continue
-  
-            # If the disc_info is a tuple, then directly has information, else grab
-            # from object attributes 
+
+            # Check the "return" status of the dialog
+            if result == IGNORE:
+                self.__log.info('Ignoring disc: %s', dev)
+                return
+
+            # Get information about disc
             if isinstance(disc_info, tuple):
                 info, sizes = disc_info
             else:
                 info, sizes = disc_info.info, disc_info.sizes
 
             # Initialize ripper object
-            ripper = Ripper(
-                dev, 
-                info,
-                sizes,
-                self.fileGen,
-                self.get_settings(),
-                progress=self.progress_dialog,
-            )
-            ripper.start()
-            self._mounted[dev] = ripper
+            if result == RIP:
+                self.rip_disc(dev, info, sizes)
+                return
+
+            if result == SAVE:
+                self.__log.info("Requested metadata save and eject: %s", dev)
+                subprocess.call(['eject', dev])
+                return
+
+            if result == OPEN:
+                self.disc_dialog(dev, discid=getDiscID(dev, self.root))
+                return
+
+            self.__log.error("Unrecognized option: %d", result)
+
+    def disc_dialog(self, dev, discid=None):
+
+        # Open dics metadata GUI and register "callback" for when closes
+        dialog = DiscDialog(
+            dev,
+            dbdir=self.dbdir,
+            discid=discid,
+        )
+        dialog.finished.connect(self.handle_disc_info)
+        self._mounted[dev] = dialog
+
+    def rip_disc(self, dev, info, sizes):
+
+        # Initialize ripper object
+        ripper = Ripper(
+            dev,
+            info,
+            sizes,
+            self.fileGen,
+            self.get_settings(),
+            progress=self.progress_dialog,
+        )
+        ripper.start()
+        self._mounted[dev] = ripper
 
 
 class Ripper(QThread):

@@ -1,5 +1,4 @@
 import logging
-import os
 
 from PyQt5.QtWidgets import (
     QWidget,
@@ -11,7 +10,7 @@ from PyQt5.QtWidgets import (
     QGridLayout,
     QFrame,
 )
-from PyQt5.QtCore import Qt, QTimer, pyqtSlot, pyqtSignal
+from PyQt5.QtCore import Qt, pyqtSlot, pyqtSignal
 
 from ..utils import get_vendor_model
 
@@ -20,15 +19,20 @@ MEGABYTE = 10**6
 
 class ProgressDialog(QWidget):
 
-    ADD_DISC = pyqtSignal(str, dict)  # First arg in dev, second is all info
-    REMOVE_DISC = pyqtSignal(str)  # Arg is dev of disc to remove
-    CUR_TRACK = pyqtSignal(str, str)  # First arg is dev, second is track num
-    TRACK_SIZE = pyqtSignal(str, int)  # First arg is dev, second is size of cur track
-    CANCEL = pyqtSignal(str)  # dev of the rip to cancel
+    # First arg in dev, second is all info
+    ADD_DISC = pyqtSignal(str, dict)
+    # Arg is dev of disc to remove
+    REMOVE_DISC = pyqtSignal(str)
+    # First arg is dev, second is track num
+    CUR_TRACK = pyqtSignal(str, str)
+    # First arg is dev, second is size of cur track
+    TRACK_SIZE = pyqtSignal(str, int)
+    # dev of the rip to cancel
+    CANCEL = pyqtSignal(str)
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        
+
         self.log = logging.getLogger(__name__)
         self.enabled = False
 
@@ -90,7 +94,7 @@ class ProgressDialog(QWidget):
         self.CANCEL.emit(dev)
         self.REMOVE_DISC.emit(dev)
 
-         
+
 class ProgressWidget(QFrame):
     """
     Progress for a single disc
@@ -121,7 +125,7 @@ class ProgressWidget(QFrame):
         )
 
         vendor, model = get_vendor_model(dev)
-        self.title = QLabel(f"{vendor} {model} : {dev}") 
+        self.title = QLabel(f"{vendor} {model} : {dev}")
         self.track_label = QLabel('')
         self.track_count = QLabel('')
         self.track_prog = QProgressBar()
@@ -161,7 +165,6 @@ class ProgressWidget(QFrame):
         if res == message.Yes:
             self.CANCEL.emit(self.dev)
 
-
     def current_track(self, title: str):
         """
         Update current track index
@@ -173,8 +176,9 @@ class ProgressWidget(QFrame):
 
         """
 
-        # If the current_title is not None, then refers to previously processed track and
-        # must update the total size of that track to be maximum size of the track
+        # If the current_title is not None, then refers to previously
+        # processed track and must update the total size of that track
+        # to be maximum size of the track
         if self.current_title is not None:
             self.title_sizes[-1] = (
                 self
@@ -197,7 +201,7 @@ class ProgressWidget(QFrame):
         )
         self.track_count.setText(
             f"Title: {self.n_titles}/{len(self)}",
-        ) 
+        )
 
         # Update progress stats for new track
         self.track_prog.setRange(

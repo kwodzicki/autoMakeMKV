@@ -11,7 +11,7 @@ from .. import DBDIR, UUID_ROOT
 EXT = '.json'
 TRACKSIZE_AP = 11  # Number used for track size in TINFO from MakeMKV
 TRACKSIZE_REG = re.compile(
-    f"TINFO:(\d+),{TRACKSIZE_AP},\d+,\"(\d+)\"",
+    rf"TINFO:(\d+),{TRACKSIZE_AP},\d+,\"(\d+)\"",
 )
 
 
@@ -114,8 +114,8 @@ def loadData(
         fpath = file_from_discid(discID, dbdir)
 
     log.debug("Path to database file : %s", fpath)
-    if not os.path.isfile( fpath ):
-        return None, None 
+    if not os.path.isfile(fpath):
+        return None, None
 
     with open(fpath, 'r') as fid:
         info = json.load(fid)
@@ -165,4 +165,3 @@ def saveData(
         json.dump(info, fid, indent=4)
 
     return True
-

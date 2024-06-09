@@ -13,17 +13,15 @@ from PyQt5.QtWidgets import (
     QAction,
     QStyle,
 )
-from PyQt5.QtGui import QIcon
 from PyQt5.QtCore import QTimer
 
 from .. import LOG, STREAM
-from ..ripper import RipperWatchdog, RUNNING
+from ..ripper import RipperWatchdog
 
 from .progress import ProgressDialog
 from .widgets import (
     MissingOutdirDialog,
     SettingsWidget,
-    PathSelector,
 )
 
 from .utils import load_settings, save_settings
@@ -50,26 +48,25 @@ class SystemTray(QSystemTrayIcon):
         self._app = app
         self._menu = QMenu()
 
-        self._label = QAction( 'autoMakeMKV' )
+        self._label = QAction('autoMakeMKV')
         self._label.setEnabled(False)
-        self._menu.addAction( self._label )
+        self._menu.addAction(self._label)
 
         self._menu.addSeparator()
 
-        self._settings = QAction( 'Settings' )
-        self._settings.triggered.connect( self.settings_widget )
-        self._menu.addAction( self._settings )
+        self._settings = QAction('Settings')
+        self._settings.triggered.connect(self.settings_widget)
+        self._menu.addAction(self._settings)
 
         self._menu.addSeparator()
 
-        self._quit = QAction( 'Quit' )
-        self._quit.triggered.connect( self.quit )
-        self._menu.addAction( self._quit )
-
+        self._quit = QAction('Quit')
+        self._quit.triggered.connect(self.quit)
+        self._menu.addAction(self._quit)
 
         self.setContextMenu(self._menu)
-        self.setVisible(True) 
-        
+        self.setVisible(True)
+
         settings = load_settings()
 
         self.progress = ProgressDialog()
@@ -79,22 +76,22 @@ class SystemTray(QSystemTrayIcon):
         )
         self.ripper.start()
 
-        # Set up check of output directory exists to run right after event loop starts
+        # Set up check of output directory exists to run right after event
+        # loop starts
         QTimer.singleShot(
             0,
             self.check_outdir_exists,
         )
 
-
     def settings_widget(self, *args, **kwargs):
 
-        self.__log.debug( 'opening settings' )
+        self.__log.debug('opening settings')
         settings_widget = SettingsWidget()
         if settings_widget.exec_():
             self.ripper.set_settings(
                 **settings_widget.get_settings(),
             )
-        
+
     def quit(self, *args, **kwargs):
         """Display quit confirm dialog"""
         self.__log.info('Saving settings')
@@ -145,17 +142,22 @@ class SystemTray(QSystemTrayIcon):
 
         self.check_outdir_exists()
 
-     
+
 def cli():
     parser = argparse.ArgumentParser()
-    parser.add_argument( '--loglevel', type=int, default=30, help='Set logging level')
-    
+    parser.add_argument(
+        '--loglevel',
+        type=int,
+        default=30,
+        help='Set logging level',
+    )
+
     args = parser.parse_args()
 
-    STREAM.setLevel( args.loglevel )
+    STREAM.setLevel(args.loglevel)
     LOG.addHandler(STREAM)
 
     app = QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)
-    w = SystemTray(app)
+    _ = SystemTray(app)
     app.exec_()

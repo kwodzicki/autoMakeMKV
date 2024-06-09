@@ -46,4 +46,3 @@ def save_settings(settings: dict) -> None:
     )
     with open(SETTINGS_FILE, 'w') as fid:
         json.dump(settings, fid)
-

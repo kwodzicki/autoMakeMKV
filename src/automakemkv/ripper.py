@@ -43,7 +43,7 @@ class RipperWatchdog(QThread):
 
     This function will run a pyudev monitor instance,
     looking for changes in disc. On change, will
-    spawn the getTitleInfo() function, loading
+    spawn the DiscDialog widget loading
     information from the database if exists, or
     prompting using for information via a GUI.
 

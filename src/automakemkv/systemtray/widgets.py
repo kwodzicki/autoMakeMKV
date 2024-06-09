@@ -13,7 +13,6 @@ from PyQt5.QtWidgets import (
     QVBoxLayout,
     QHBoxLayout,
 )
-from PyQt5.QtCore import QTimer, pyqtSlot
 
 from .utils import load_settings, save_settings
 
@@ -37,7 +36,7 @@ class MissingOutdirDialog(QDialog):
             outdir,
             os.linesep,
             "Would you like to select a new one?",
-        ) 
+        )
         message = QLabel(
             os.linesep.join(message)
         )
@@ -46,7 +45,7 @@ class MissingOutdirDialog(QDialog):
         self.setLayout(self.layout)
 
 
-class SettingsWidget( QDialog ):
+class SettingsWidget(QDialog):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -67,7 +66,7 @@ class SettingsWidget( QDialog ):
         self.set_settings()
 
         buttons = QDialogButtonBox.Save | QDialogButtonBox.Cancel
-        button_box = QDialogButtonBox(buttons) 
+        button_box = QDialogButtonBox(buttons)
         button_box.accepted.connect(self.accept)
         button_box.rejected.connect(self.reject)
 
@@ -75,7 +74,7 @@ class SettingsWidget( QDialog ):
         layout.addWidget(self.dbdir)
         layout.addWidget(self.outdir)
         layout.addWidget(radio_widget)
-        layout.addWidget(button_box) 
+        layout.addWidget(button_box)
         self.setLayout(layout)
 
     def set_settings(self):
@@ -116,8 +115,8 @@ class PathSelector(QWidget):
         self.path_button.clicked.connect(self.path_select)
 
         layout = QHBoxLayout()
-        layout.addWidget(self.path_text) 
-        layout.addWidget(self.path_button) 
+        layout.addWidget(self.path_text)
+        layout.addWidget(self.path_button)
         widget = QWidget()
         widget.setLayout(layout)
 

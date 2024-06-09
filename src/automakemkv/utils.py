@@ -14,9 +14,10 @@ import os
 import re
 
 # Characters that are not allowed in file paths
-BADCHARS = re.compile( r'[#%\\\<\>\*\?/\$\!\:\@]' )
+BADCHARS = re.compile(r'[#%\\\<\>\*\?/\$\!\:\@]')
 
-def format_dbkey( info ):
+
+def format_dbkey(info: dict) -> str:
     """
     Plex format for database ID
 
@@ -40,7 +41,13 @@ def format_dbkey( info ):
         return f"{{{key}}}"
     return None
 
-def build_series( outdir, info, ext, extras ):
+
+def build_series(
+    outdir: str,
+    info: dict,
+    ext: str,
+    extras,
+) -> tuple:
     """
     Plex format for TV Show file name
 
@@ -62,9 +69,15 @@ def build_series( outdir, info, ext, extras ):
 
     """
 
+    pass
 
 
-def build_movie( outdir, info, ext, extras ):
+def build_movie(
+    outdir: str,
+    info: dict,
+    ext: str,
+    extras: bool,
+) -> tuple:
     """
     Plex format for Movie file name
 
@@ -88,28 +101,36 @@ def build_movie( outdir, info, ext, extras ):
 
     for tid, title in info['titles'].items():
         if title['extra'] == 'edition':
-            fpath   = [f"{info['title']} ({info['year']})"]
+            fpath = [f"{info['title']} ({info['year']})"]
             edition = title['extraTitle']
             if title['extraTitle'] != '':
                 edition = "{" + f"edition-{edition}" + "}"
-            fpath.append( edition )
+            fpath.append(edition)
         elif extras:
             fpath = [f"{title['extraTitle']}-{title['extra']}", ""]
         else:
             continue
 
-        fpath.append( format_dbkey( info ) )
+        fpath.append(
+            format_dbkey(info)
+        )
 
-        yield tid, os.path.join( outdir, '.'.join(fpath)+ext )
+        yield tid, os.path.join(outdir, '.'.join(fpath)+ext)
 
-def build_outfile( outdir, info, ext='.mkv', extras=False ):
+
+def build_outfile(
+    outdir: str,
+    info: dict,
+    ext: str = '.mkv',
+    extras: bool = False,
+) -> tuple:
     """
     Example function for naming output files
 
     """
 
-    if not os.path.isdir( outdir ):
-        os.makedirs( outdir )
+    if not os.path.isdir(outdir):
+        os.makedirs(outdir)
 
     if not ext.startswith('.'):
         ext = "."+ext
@@ -118,9 +139,10 @@ def build_outfile( outdir, info, ext='.mkv', extras=False ):
     elif info['isSeries']:
         func = build_series
 
-    yield from func( outdir, info, ext, extras )
+    yield from func(outdir, info, ext, extras)
 
-def video_utils_dbkey( info ):
+
+def video_utils_dbkey(info: dict) -> str:
     """
     Create database key
 
@@ -135,7 +157,7 @@ def video_utils_dbkey( info ):
         str : Database key
 
     """
- 
+
     if info['isMovie']:
         keys = ['tmdb', 'imdb']
     elif info['isSeries']:
@@ -148,7 +170,15 @@ def video_utils_dbkey( info ):
 
     raise Exception('Failed to get database ID')
 
-def video_utils_movie( outdir, info, ext, everything, extras, **kwargs ):
+
+def video_utils_movie(
+    outdir: str,
+    info: dict,
+    ext: str,
+    everything: bool,
+    extras: bool,
+    **kwargs,
+) -> tuple:
     """
     Generate video_utils compliant movie name
 
@@ -169,7 +199,7 @@ def video_utils_movie( outdir, info, ext, everything, extras, **kwargs ):
         **kwargs :
 
     Returns:
-        generator : Will return tuple of track ID for MakeMKV and 
+        generator : Will return tuple of track ID for MakeMKV and
             full-path of output file
 
     """
@@ -177,10 +207,11 @@ def video_utils_movie( outdir, info, ext, everything, extras, **kwargs ):
     log = logging.getLogger(__name__)
 
     for tid, title in info['titles'].items():
-        fpath = [ video_utils_dbkey(title), '' ]
+        fpath = [video_utils_dbkey(title), '']
         # If extraTitle is NOT empty, then title is an extra
         if title['extraTitle'] != '':
-            # If is NOT 'edition' and neither all nor extras is set, then we aren't ripping title
+            # If is NOT 'edition' and neither all nor extras is set,
+            # then we aren't ripping title
             if title['extra'] != 'edition' and not (everything or extras):
                 continue
             extra = [title['extra'], replace_chars(title['extraTitle'])]
@@ -197,9 +228,16 @@ def video_utils_movie( outdir, info, ext, everything, extras, **kwargs ):
             title.get('extra', 'extra'),
             title.get('extraTitle', '') or 'NA',
         )
-        yield tid, os.path.join( outdir, '.'.join(fpath)+ext )
+        yield tid, os.path.join(outdir, '.'.join(fpath)+ext)
 
-def video_utils_series( outdir, info, ext, *args, **kwargs ):
+
+def video_utils_series(
+    outdir: str,
+    info: dict,
+    ext: str,
+    *args,
+    **kwargs,
+) -> tuple:
     """
     Function for series output naming
 
@@ -219,7 +257,7 @@ def video_utils_series( outdir, info, ext, *args, **kwargs ):
         **kwargs : Silently ignored
 
     Yields:
-        tuple : Disc track ID and path to output file 
+        tuple : Disc track ID and path to output file
 
     """
 
@@ -229,9 +267,11 @@ def video_utils_series( outdir, info, ext, *args, **kwargs ):
         if title['extra'] != '':
             continue
 
-        season  = int(title['season'] )
-        season  = f"S{season:02d}"
-        episode = list(map(int, title['episode'].split('-')))
+        season = int(title['season'])
+        season = f"S{season:02d}"
+        episode = list(
+            map(int, title['episode'].split('-'))
+        )
         if len(episode) == 1:
             episode = f"E{episode[0]:02d}"
         elif len(episode) > 1:
@@ -239,7 +279,7 @@ def video_utils_series( outdir, info, ext, *args, **kwargs ):
         else:
             raise Exception("Issue with epsiode numbering")
 
-        fpath   = [ video_utils_dbkey( title ), season+episode ]
+        fpath = [video_utils_dbkey(title), season+episode]
         log.info(
             "Will rip: %s (%s) S%sE%s %s-%s",
             title.get('title', ''),
@@ -249,15 +289,22 @@ def video_utils_series( outdir, info, ext, *args, **kwargs ):
             title.get('extra', 'extra'),
             title.get('extraTitle', '') or 'NA',
         )
- 
-        yield tid, os.path.join( outdir, '.'.join(fpath)+ext )
 
-def video_utils_outfile( outdir, info, ext='.mkv', everything=False, extras=False ):
+        yield tid, os.path.join(outdir, '.'.join(fpath)+ext)
+
+
+def video_utils_outfile(
+    outdir: str,
+    info: dict,
+    ext: str = '.mkv',
+    everything: bool = False,
+    extras: bool = False,
+) -> tuple:
     """
     General output file namer
 
     Create output file names that meet the naming
-    criteria for the video_utils package. This 
+    criteria for the video_utils package. This
     function will determine if should use movie naming
     or series naming based on inforamtion in the info
     dict.
@@ -275,13 +322,12 @@ def video_utils_outfile( outdir, info, ext='.mkv', everything=False, extras=Fals
         extras (bool) : If set, rip ONLY the extra features.
 
     Yields:
-        tuple : Disc track ID and path to output file
-            to rip 
+        tuple : Disc track ID and path to output file to rip
 
     """
 
-    if not os.path.isdir( outdir ):
-        os.makedirs( outdir )
+    if not os.path.isdir(outdir):
+        os.makedirs(outdir)
 
     if not ext.startswith('.'):
         ext = "."+ext
@@ -290,68 +336,57 @@ def video_utils_outfile( outdir, info, ext='.mkv', everything=False, extras=Fals
     elif info['isSeries']:
         func = video_utils_series
 
-    yield from func( outdir, info, ext, everything, extras )
+    yield from func(outdir, info, ext, everything, extras)
 
-def _replace( string, repl, **kwargs ):
-    """                                                                           
-    'Private' function for replace characters in string                           
-    
-    Arguments:                                                                    
-        string (str): String to have characters replaced                            
-        repl (str): String to replace bad characters with                           
-    
-    Keyword arguments:                                                            
-        **kwargs: Any, none used currently                                          
-    
-    Returns:                                                                      
-        str: String with bad values repaced by repl value                           
-    
+
+def _replace(string: str, repl: str, **kwargs) -> str:
+    """
+    'Private' function for replace characters in string
+
+    Arguments:
+        string (str): String to have characters replaced
+        repl (str): String to replace bad characters with
+
+    Keyword arguments:
+        **kwargs: Any, none used currently
+
+    Returns:
+        str: String with bad values repaced by repl value
+
     """
 
-    return BADCHARS.sub( repl, string ).replace('&', 'and').strip()
+    return BADCHARS.sub(repl, string).replace('&', 'and').strip()
 
-def replace_chars( *args, repl = ' ', **kwargs ):
-    """                                                                           
-    Replace invalid path characters; '&' replaced with 'and'                      
-    
-    Arguments:                                                                    
-        *args (str): String(s) to replace characters in                             
-    
-    Keyword arguments:                                                            
-        repl (str): String to replace bad characters with; default is space (' ')   
-        **kwargs                                                                    
-    
-    Returns:                                                                      
-        String, or list, with bad values replaced by repl value                     
-    
+
+def replace_chars(*args, repl: str = ' ', **kwargs):
+    """
+    Replace invalid path characters; '&' replaced with 'and'
+
+    Arguments:
+        *args (str): String(s) to replace characters in
+
+    Keyword arguments:
+        repl (str): String to replace bad characters with;
+            default is space (' ')
+        **kwargs
+
+    Returns:
+        String, or list, with bad values replaced by repl value
+
     """
 
     # If one input argument
     if len(args) == 1:
-        return _replace( args[0], repl, **kwargs )
+        return _replace(args[0], repl, **kwargs)
 
     # Iterate over all input arguments, returning list
-    return [ _replace( arg, repl, **kwargs ) for arg in args ]
-
-def logger_thread(q):
-    """
-    To handle logs from other processes
-
-    Arguments:
-        q (Queue) : A multiprocessing Queue object that will contain
-            log objects from other processes.
-
-    """
-
-    while True:
-        record = q.get()
-        if record is None:
-            break
-        logger = logging.getLogger(record.name)
-        logger.handle(record)
+    return [
+        _replace(arg, repl, **kwargs)
+        for arg in args
+    ]
 
 
-def get_vendor_model(path):
+def get_vendor_model(path: str) -> tuple[str]:
     """
     Get the vendor and model of drive
 

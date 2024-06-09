@@ -8,16 +8,14 @@ import os
 import re
 import gzip
 
-from threading import Thread
 from subprocess import Popen, PIPE, STDOUT
 
 from PyQt5 import QtCore
 
-#from . import TEST_DATA_FILE, DBDIR
 from .mkv_lookup import AP
 from .mediaInfo import utils
 
-SPLIT = re.compile( r'(".*?"|[^,]+)' )
+SPLIT = re.compile(r'(".*?"|[^,]+)')
 
 
 class MakeMKVThread(QtCore.QThread):
@@ -47,13 +45,13 @@ class MakeMKVThread(QtCore.QThread):
     def makemkvcon(self):
         """
         Run the makemkvcon command
-    
+
         """
-    
+
         if self.command not in ('info', 'mkv', 'backup', 'f', 'reg'):
             self.log.error("Unsupported command : '%s'", self.command)
             return
-    
+
         cmd = ['makemkvcon', self.command]
         for key, val in self.opts.items():
             kkey = f"--{key}"
@@ -65,7 +63,7 @@ class MakeMKVThread(QtCore.QThread):
                     val = str(val).lower()
                 cmd.extend([kkey, str(val)])
         cmd.extend(self.args)
-    
+
         self.log.debug("Running command : %s", ' '.join(cmd))
         self.proc = Popen(
             cmd,
@@ -73,7 +71,6 @@ class MakeMKVThread(QtCore.QThread):
             stdout=PIPE,
             stderr=STDOUT,
         )
-
 
     def run(self):
         """Method to run in thread"""
@@ -91,7 +88,7 @@ class MakeMKVThread(QtCore.QThread):
 
 class MakeMKVRip(MakeMKVThread):
 
-    def __init__(self, source, title, dest_folder, **kwargs):
+    def __init__(self, source: str, title: str, dest_folder: str, **kwargs):
         super().__init__(
             'mkv',  # Command set to mkv
             f"dev:{source}",  # Source: is dev
@@ -115,18 +112,25 @@ class MakeMKVRip(MakeMKVThread):
         self.proc.communicate()
         self.log.info("MakeMKVRip thread dead")
 
+
 class MakeMKVInfo(MakeMKVThread):
     """
     Class to parse makemkvcon output
 
-    Parses the robot output of MakeMKV to determine what titles/tracks have what
-    information
+    Parses the robot output of MakeMKV to determine what titles/tracks
+    have what information
 
     """
 
     signal = QtCore.pyqtSignal(str)
 
-    def __init__(self, source='/dev/sr0', dbdir=None, debug=False, **kwargs):
+    def __init__(
+        self,
+        source: str = '/dev/sr0',
+        dbdir: str | None = None,
+        debug: bool = False,
+        **kwargs,
+    ):
         super().__init__(
             "info",
             f"dev:{source}",
@@ -145,7 +149,7 @@ class MakeMKVInfo(MakeMKVThread):
         Run as separate thread
 
         This thread will start the makemkvcon process
-        and iterate over the output from the command 
+        and iterate over the output from the command
         line by line, parsing each line.
 
         Message lines are put on a Queue() object so
@@ -161,14 +165,15 @@ class MakeMKVInfo(MakeMKVThread):
         # Start scanning disc
         self.makemkvcon()
 
-        # Open gzip file for storing robot output and write MakeMKV output to file
+        # Open gzip file for storing robot output and write MakeMKV
+        # output to file
         with gzip.open(self.info_path, 'wt') as fid:
             for line in iter(self.proc.stdout.readline, ''):
                 fid.write(line)
                 self.parse_line(line)
         self.proc.wait()
 
-    def loadFile(self, json=None):
+    def loadFile(self, json: str | None = None) -> None:
         """
         Load stored MakeMKV robot output
 
@@ -184,30 +189,29 @@ class MakeMKVInfo(MakeMKVThread):
             for line in iid.readlines():
                 self.parse_line(line)
 
-    def parse_line( self, line ):
+    def parse_line(self, line: str) -> None:
         """Parse lines from makemkvcon"""
 
         infoType, *data = line.strip().split(':')
-        data = ':'.join( data )
+        data = ':'.join(data)
 
         if infoType == 'MSG':
-            _, _, _, val, *_ = SPLIT.findall( data )
+            _, _, _, val, *_ = SPLIT.findall(data)
             self.signal.emit(val.strip('"'))
         elif infoType == 'CINFO':
-            cid, _, val = SPLIT.findall( data )
+            cid, _, val = SPLIT.findall(data)
             if cid in AP:
-                self.discInfo[ AP[cid] ] = val.strip('"')
+                self.discInfo[AP[cid]] = val.strip('"')
         elif infoType == 'TINFO':
-            title, tid, _, val = SPLIT.findall( data )
+            title, tid, _, val = SPLIT.findall(data)
             if title not in self.titles:
-                self.titles[title] = {'streams' : {}}
+                self.titles[title] = {'streams': {}}
             if tid in AP:
-                self.titles[title][ AP[tid] ] = val.strip('"')
+                self.titles[title][AP[tid]] = val.strip('"')
         elif infoType == 'SINFO':
-            title, stream, sid, _, val = SPLIT.findall( data )
+            title, stream, sid, _, val = SPLIT.findall(data)
             tt = self.titles[title]['streams']
             if stream not in tt:
                 tt[stream] = {}
             if sid in AP:
-                tt[stream][ AP[sid] ] = val.strip('"')
-
+                tt[stream][AP[sid]] = val.strip('"')

@@ -6,11 +6,11 @@ import os
 UUID_ROOT = "/dev/disk/by-uuid"
 
 HOMEDIR = os.path.expanduser('~')
-DBDIR   = os.path.join(
+DBDIR = os.path.join(
     HOMEDIR,
     f".{__name__}DB",
 )
-APPDIR  = os.path.join(
+APPDIR = os.path.join(
     HOMEDIR,
     'Library',
     'Application Support',
@@ -21,22 +21,23 @@ LOGDIR = os.path.join(
     'logs',
 )
 
-os.makedirs( APPDIR, exist_ok=True )
-os.makedirs( LOGDIR, exist_ok=True )
+os.makedirs(APPDIR, exist_ok=True)
+os.makedirs(LOGDIR, exist_ok=True)
 
 TEST_DATA_FILE = os.path.join(
-    APPDIR, 'testing.txt'
+    APPDIR,
+    'testing.txt',
 )
 SETTINGS_FILE = os.path.join(
     APPDIR,
     'settings.json',
 )
 
-LOG    = logging.getLogger( __name__ )
-LOG.setLevel( logging.DEBUG )
+LOG = logging.getLogger(__name__)
+LOG.setLevel(logging.DEBUG)
 
 STREAM = logging.StreamHandler()
-STREAM.setLevel( logging.WARNING )
+STREAM.setLevel(logging.WARNING)
 STREAM.setFormatter(
     logging.Formatter(
         '%(asctime)s [%(levelname).4s] %(message)s'
@@ -45,8 +46,8 @@ STREAM.setFormatter(
 
 ROTFILE = RotatingFileHandler(
     os.path.join(LOGDIR, f"{__name__}.log"),
-    maxBytes    = 500*2**10,
-    backupCount = 5,
+    maxBytes=500*2**10,
+    backupCount=5,
 )
 ROTFILE.setLevel(logging.INFO)
 ROTFILE.setFormatter(

@@ -4,22 +4,27 @@ Utilities for ripping titles
 """
 
 import logging
-from logging.handlers import QueueHandler
 import argparse
 import os
 import signal
 import subprocess
-import multiprocessing as mp
-from threading import Thread, Event
+from threading import Event
 from PyQt5.QtCore import QThread, pyqtSignal, pyqtSlot
 
 import pyudev
 
 from . import UUID_ROOT, DBDIR, LOG, STREAM
-from .mediaInfo.gui import DiscDialog, ExistingDiscOptions, RIP, SAVE, OPEN, IGNORE
+from .mediaInfo.gui import (
+    DiscDialog,
+    ExistingDiscOptions,
+    RIP,
+    SAVE,
+    OPEN,
+    IGNORE,
+)
 from .mediaInfo.utils import getDiscID, loadData
 from .makemkv import MakeMKVRip
-from .utils import video_utils_outfile, logger_thread, get_vendor_model
+from .utils import video_utils_outfile
 
 KEY = 'DEVNAME'
 CHANGE = 'DISK_MEDIA_CHANGE'
@@ -28,8 +33,8 @@ SIZE_POLL = 10
 
 RUNNING = Event()
 
-signal.signal(signal.SIGINT, lambda *args : RUNNING.set())
-signal.signal(signal.SIGTERM, lambda *args : RUNNING.set())
+signal.signal(signal.SIGINT, lambda *args: RUNNING.set())
+signal.signal(signal.SIGTERM, lambda *args: RUNNING.set())
 
 
 class RipperWatchdog(QThread):
@@ -75,16 +80,15 @@ class RipperWatchdog(QThread):
     ):
         """
         Arguments:
-            outdir (str) : Top-level directory for ripping
-                files
-    
+            outdir (str) : Top-level directory for ripping files
+
         Keyword arguments:
             everything (bool) : If set, then all titles identified
                 for ripping will be ripped. By default, only the
                 main feature will be ripped
             extras (bool) : If set, only 'extra' features will
                 be ripped along with the main title(s). Main
-                title(s) include Theatrical/Extended/etc. 
+                title(s) include Theatrical/Extended/etc.
                 versions for movies, and episodes for series.
             root (str) : Location of the 'by-uuid' directory
                 where discs are mounted. This is used to
@@ -99,14 +103,14 @@ class RipperWatchdog(QThread):
 
         """
 
-        super().__init__() 
+        super().__init__()
         self.__log = logging.getLogger(__name__)
         self.__log.debug("%s started", __name__)
 
         self.MOUNT_SIGNAL.connect(self.get_disc_info)
- 
+
         self._outdir = None
- 
+
         self.dbdir = kwargs.get('dbdir', DBDIR)
         self.outdir = outdir
         self.everything = everything
@@ -115,7 +119,7 @@ class RipperWatchdog(QThread):
         self.fileGen = fileGen
         self.progress_dialog = progress_dialog
 
-        self._mounting = {} 
+        self._mounting = {}
         self._mounted = {}
         self._context = pyudev.Context()
         self._monitor = pyudev.Monitor.from_netlink(self._context)
@@ -127,7 +131,6 @@ class RipperWatchdog(QThread):
 
     @outdir.setter
     def outdir(self, val):
-        #os.makedirs(val, exist_ok=True)
         self.__log.info('Output directory set to : %s', val)
         self._outdir = val
 
@@ -156,8 +159,8 @@ class RipperWatchdog(QThread):
         """
         Processing for thread
 
-        Polls udev for device changes, running MakeMKV pipelines when dvd/bluray
-        found
+        Polls udev for device changes, running MakeMKV pipelines
+        when dvd/bluray found
 
         """
 
@@ -175,14 +178,15 @@ class RipperWatchdog(QThread):
             # If we did NOT change an insert/eject event
             if device.properties.get(CHANGE, None):
                 if device.properties.get(STATUS, '') != 'complete':
-                    self.__log.debug(
-                        'Caught event that was NOT insert/eject, ignoring : %s',
-                        dev,
+                    msg = (
+                        'Caught event that was NOT insert/eject, '
+                        'ignoring : %s'
                     )
+                    self.__log.debug(msg, dev)
                     continue
                 self.__log.debug('Finished mounting : %s', dev)
                 self.MOUNT_SIGNAL.emit(dev)
-                self._mounted[dev] = None 
+                self._mounted[dev] = None
                 continue
 
             # If dev is NOT in mounted, initialize to False
@@ -208,16 +212,16 @@ class RipperWatchdog(QThread):
     @pyqtSlot(str)
     def get_disc_info(self, dev):
         """
-        Get information about a disc 
-    
-        Given the /dev path to a disc, load information from database if it exists or
-        open GUI for user to input information
-    
+        Get information about a disc
+
+        Given the /dev path to a disc, load information from database if
+        it exists or open GUI for user to input information
+
         Arguments:
             dev (str) : Device to rip from
-    
+
         """
-    
+
         # Attept to get UUID of disc
         uuid = getDiscID(dev, self.root)
         if uuid is None:
@@ -236,16 +240,16 @@ class RipperWatchdog(QThread):
         self._mounted[dev] = (info, sizes)
         self.options_dialog = ExistingDiscOptions()
         self.options_dialog.finished.connect(self.handle_disc_info)
- 
+
     @pyqtSlot(int)
     def handle_disc_info(self, result):
         """
         Rip a whole disc
-    
+
         Given information about a disc, rip
         all tracks. Intended to be run as thread
         so watchdog can keep looking for new discs
-    
+
         Arguments:
             dev (str) : Device to rip from
             root (str) : Location of the 'by-uuid' directory
@@ -253,7 +257,7 @@ class RipperWatchdog(QThread):
                 get the unique ID of the disc.
             outdir (str) : Directory to save mkv files to
             extras (bool) : Flag for if should rip extras
-    
+
         """
 
         # Get list of keys for mounted devices, then iterate over them
@@ -321,7 +325,7 @@ class Ripper(QThread):
 
     def __init__(self, dev, info, sizes, fileGen, settings, progress=None):
         super().__init__()
-        self.log  = logging.getLogger(__name__)
+        self.log = logging.getLogger(__name__)
 
         self._dead = False
         self.dev = dev
@@ -340,7 +344,7 @@ class Ripper(QThread):
         if self.info is None:
             self.log.error("No title information found/entered : %s", self.dev)
             return
- 
+
         if self.info == 'skiprip':
             self.log.info("Just saving metadata, not ripping : %s", self.dev)
             return
@@ -372,33 +376,33 @@ class Ripper(QThread):
     def rip_title(self, title, outfile):
         """
         Rip a given title from a disc
-    
-        Rip a title from the given disc to 
+
+        Rip a title from the given disc to
         a specific output file.
-    
+
         Arguments:
             title (str) : Title to rip
             outfile (str) : Name of the output file
-    
+
         Returns:
             bool : True if ripped, False otherwise
-    
+
         """
-    
-        outdir = os.path.dirname( outfile )
-        if not os.path.isdir( outdir ):
-            os.makedirs( outdir )
-    
+
+        outdir = os.path.dirname(outfile)
+        if not os.path.isdir(outdir):
+            os.makedirs(outdir)
+
         tmpdir = os.path.splitext(
             os.path.basename(outfile),
         )[0]
         tmpdir = os.path.join(outdir, tmpdir)
         self.log.debug("Creating temporary directory : '%s'", tmpdir)
         os.makedirs(tmpdir, exist_ok=True)
-    
+
         if self.progress is not None:
             self.progress.CUR_TRACK.emit(self.dev, title)
-    
+
         self.log.info("[%s - %s] Ripping track", self.dev, title)
         self.mkv_thread = MakeMKVRip(
             self.dev,
@@ -409,48 +413,55 @@ class Ripper(QThread):
         )
         self.mkv_thread.start()
 
-        while not RUNNING.wait(timeout=SIZE_POLL) and self.mkv_thread.isRunning():
+        while (
+            not RUNNING.wait(timeout=SIZE_POLL)
+            and self.mkv_thread.isRunning()
+        ):
             if self.progress is None:
                 continue
             self.progress.TRACK_SIZE.emit(self.dev, directory_size(tmpdir))
-    
+
         if RUNNING.is_set():
             self.mkv_thread.quit()
             self.mkv_thread.wait()
             return
-    
+
         files = [
             os.path.join(tmpdir, item) for item in os.listdir(tmpdir)
         ]
-    
+
         status = False
         if self.mkv_thread.returncode != 0:
             fdirs = []
             for fname in files:
-                dirs.append(os.path.dirname(fname))
+                fdirs.append(os.path.dirname(fname))
                 os.remove(fname)
             for fdir in set(fdirs):
                 try:
                     os.rmdir(fdir)
-                except:
+                except FileNotFoundError:
                     pass
-            self.log.error("Error ripping track '%s' from '%s'", title, self.dev)
+            self.log.error(
+                "Error ripping track '%s' from '%s'",
+                title,
+                self.dev,
+            )
         elif len(files) != 1:
             self.log.error('Too many output files!')
             for fname in files:
-                os.remove( fname )
+                os.remove(fname)
         else:
             self.log.info("Renaming file '%s' ---> '%s'", files[0], outfile)
-            os.rename( files[0], outfile )
+            os.rename(files[0], outfile)
             status = True
-    
-        os.rmdir( tmpdir )
-    
+
+        os.rmdir(tmpdir)
+
         return status
 
     def run(self):
         self.rip_disc()
-        subprocess.call(['eject', self.dev]) 
+        subprocess.call(['eject', self.dev])
 
     @pyqtSlot()
     def kill(self):
@@ -458,6 +469,7 @@ class Ripper(QThread):
         if self.mkv_thread is None:
             return
         self.mkv_thread.quit()
+
 
 def directory_size(path):
     """
@@ -474,15 +486,35 @@ def directory_size(path):
 
 def cli():
     parser = argparse.ArgumentParser()
-    parser.add_argument( 'outdir',     type=str, help='Directory to save ripped titles to')
-    parser.add_argument( '--loglevel', type=int, default=30, help='Set logging level')
-    parser.add_argument( '--all',    action='store_true', help="If set, all tiltes (main and extra) will be ripped" )
-    parser.add_argument( '--extras', action='store_true', help="If set, only 'extra' titles will be ripped" )
-
+    parser.add_argument(
+        'outdir',
+        type=str,
+        help='Directory to save ripped titles to',
+    )
+    parser.add_argument(
+        '--loglevel',
+        type=int,
+        default=30,
+        help='Set logging level',
+    )
+    parser.add_argument(
+        '--all',
+        action='store_true',
+        help="If set, all tiltes (main and extra) will be ripped",
+    )
+    parser.add_argument(
+        '--extras',
+        action='store_true',
+        help="If set, only 'extra' titles will be ripped",
+    )
 
     args = parser.parse_args()
-    mp.set_start_method('spawn')
 
-    STREAM.setLevel( args.loglevel )
+    STREAM.setLevel(args.loglevel)
     LOG.addHandler(STREAM)
-    watchdog( args.outdir, everything=args.all, extras=args.extras )
+    watchdog = RipperWatchdog(
+        args.outdir,
+        everything=args.all,
+        extras=args.extras,
+    )
+    watchdog.start()

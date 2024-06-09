@@ -8,7 +8,6 @@ from logging.handlers import QueueHandler
 import argparse
 import os
 import signal
-import time
 import subprocess
 import multiprocessing as mp
 from threading import Thread, Event
@@ -323,12 +322,16 @@ class Ripper(QThread):
     def __init__(self, dev, info, sizes, fileGen, settings, progress=None):
         super().__init__()
         self.log  = logging.getLogger(__name__)
+
+        self._dead = False
         self.dev = dev
         self.info = info
         self.sizes = sizes
         self.fileGen = fileGen
         self.settings = settings
         self.progress = progress
+
+        self.progress.CANCEL.connect(self.kill)
 
         self.logthread = None
 
@@ -363,6 +366,8 @@ class Ripper(QThread):
 
         for title, info in info.items():
             self.rip_title(title, info['path'])
+            if self._dead:
+                return
 
     def rip_title(self, title, outfile):
         """
@@ -420,8 +425,15 @@ class Ripper(QThread):
     
         status = False
         if self.mkv_thread.returncode != 0:
+            fdirs = []
             for fname in files:
+                dirs.append(os.path.dirname(fname))
                 os.remove(fname)
+            for fdir in set(fdirs):
+                try:
+                    os.rmdir(fdir)
+                except:
+                    pass
             self.log.error("Error ripping track '%s' from '%s'", title, self.dev)
         elif len(files) != 1:
             self.log.error('Too many output files!')
@@ -440,7 +452,9 @@ class Ripper(QThread):
         self.rip_disc()
         subprocess.call(['eject', self.dev]) 
 
+    @pyqtSlot()
     def kill(self):
+        self._dead = True
         if self.mkv_thread is None:
             return
         self.mkv_thread.quit()

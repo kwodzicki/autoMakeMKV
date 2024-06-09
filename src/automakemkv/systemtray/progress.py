@@ -5,26 +5,37 @@ from PyQt5.QtWidgets import (
     QWidget,
     QProgressBar,
     QLabel,
+    QPushButton,
+    QMessageBox,
     QVBoxLayout,
     QGridLayout,
     QFrame,
 )
-from PyQt5.QtCore import QTimer, pyqtSlot, pyqtSignal
+from PyQt5.QtCore import Qt, QTimer, pyqtSlot, pyqtSignal
+
+from ..utils import get_vendor_model
 
 MEGABYTE = 10**6
 
 
 class ProgressDialog(QWidget):
+
     ADD_DISC = pyqtSignal(str, dict)  # First arg in dev, second is all info
     REMOVE_DISC = pyqtSignal(str)  # Arg is dev of disc to remove
     CUR_TRACK = pyqtSignal(str, str)  # First arg is dev, second is track num
     TRACK_SIZE = pyqtSignal(str, int)  # First arg is dev, second is size of cur track
+    CANCEL = pyqtSignal(str)  # dev of the rip to cancel
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         
         self.log = logging.getLogger(__name__)
         self.enabled = False
+
+        self.setWindowFlags(
+            self.windowFlags()
+            & ~Qt.WindowCloseButtonHint
+        )
 
         self.widgets = {}
         self.layout = QVBoxLayout()
@@ -42,6 +53,8 @@ class ProgressDialog(QWidget):
     def add_disc(self, dev: str, info: dict):
         self.log.debug("Adding disc: %s", dev)
         widget = ProgressWidget(dev, info)
+        widget.CANCEL.connect(self.cancel)
+
         self.layout.addWidget(widget)
         self.widgets[dev] = widget
         self.show()
@@ -52,7 +65,7 @@ class ProgressDialog(QWidget):
         widget = self.widgets.pop(dev, None)
         if widget is not None:
             self.layout.removeWidget(widget)
-            self.widget.deleteLater()
+            widget.deleteLater()
         if len(self.widgets) == 0:
             self.setVisible(False)
 
@@ -72,7 +85,12 @@ class ProgressDialog(QWidget):
             return
         widget.track_size(tsize)
 
-        
+    @pyqtSlot(str)
+    def cancel(self, dev):
+        self.CANCEL.emit(dev)
+        self.REMOVE_DISC.emit(dev)
+
+         
 class ProgressWidget(QFrame):
     """
     Progress for a single disc
@@ -83,6 +101,8 @@ class ProgressWidget(QFrame):
 
     """
 
+    CANCEL = pyqtSignal(str)  # dev to cancel rip of
+
     def __init__(self, dev, info):
         super().__init__()
 
@@ -91,15 +111,17 @@ class ProgressWidget(QFrame):
         )
         self.setLineWidth(1)
 
-        self.info = info
-        self.current_title = None
         self.n_titles = 0
         self.title_sizes = []
+        self.current_title = None
+        self.dev = dev
+        self.info = info
         tot_size = scale_mb(
             sum(t.get('size', 0) for t in info.values())
         )
 
-        self.title = QLabel(f"Disc: {dev}") 
+        vendor, model = get_vendor_model(dev)
+        self.title = QLabel(f"{vendor} {model} : {dev}") 
         self.track_label = QLabel('')
         self.track_count = QLabel('')
         self.track_prog = QProgressBar()
@@ -109,6 +131,9 @@ class ProgressWidget(QFrame):
         self.disc_prog.setRange(0, tot_size)
         self.disc_prog.setValue(0)
 
+        self.cancel_but = QPushButton("Cancel Rip")
+        self.cancel_but.clicked.connect(self.cancel)
+
         layout = QGridLayout()
         layout.addWidget(self.title, 0, 0, 1, 3)
         layout.addWidget(self.track_label, 10, 0)
@@ -116,11 +141,26 @@ class ProgressWidget(QFrame):
         layout.addWidget(self.track_prog, 11, 0, 1, 3)
         layout.addWidget(self.disc_label, 20, 0, 1, 3)
         layout.addWidget(self.disc_prog, 21, 0, 1, 3)
+        layout.addWidget(self.cancel_but, 30, 0, 1, 3)
 
         self.setLayout(layout)
 
     def __len__(self):
         return len(self.info)
+
+    def cancel(self, *args, **kwargs):
+        print(args, kwargs)
+
+        message = QMessageBox()
+        res = message.question(
+            self,
+            '',
+            "Are you sure you want to cancel the rip?",
+            message.Yes | message.No,
+        )
+        if res == message.Yes:
+            self.CANCEL.emit(self.dev)
+
 
     def current_track(self, title: str):
         """

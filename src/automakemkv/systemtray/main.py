@@ -55,13 +55,6 @@ class SystemTray(QSystemTrayIcon):
         self._menu.addAction( self._label )
 
         self._menu.addSeparator()
-        self._progress = QAction('Show Progress')
-        self._progress.setToolTip(
-            "Opens a dialog window to show status of rip(s). "
-            "The window will close once rip(s) is complete."
-        )
-        self._progress.setCheckable(True)
-        self._menu.addAction(self._progress)
 
         self._settings = QAction( 'Settings' )
         self._settings.triggered.connect( self.settings_widget )
@@ -78,9 +71,7 @@ class SystemTray(QSystemTrayIcon):
         self.setVisible(True) 
         
         settings = load_settings()
-        self._progress.setChecked(
-            settings.get('progress', True)
-        )
+
         self.progress = ProgressDialog()
         self.ripper = RipperWatchdog(
             progress_dialog=self.progress,
@@ -108,11 +99,9 @@ class SystemTray(QSystemTrayIcon):
         """Display quit confirm dialog"""
         self.__log.info('Saving settings')
 
-        settings = {
-            **self.ripper.get_settings(),
-            'progress': self._progress.isChecked(),
-        }
-        save_settings(settings)
+        save_settings(
+            self.ripper.get_settings(),
+        )
 
         if kwargs.get('force', False):
             self.__log.info('Force quit')

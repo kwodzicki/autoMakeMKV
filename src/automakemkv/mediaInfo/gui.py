@@ -4,6 +4,7 @@ import os
 from PyQt5 import QtCore, QtWidgets, QtGui, Qt
 
 from ..makemkv import MakeMKVInfo
+from ..utils import get_vendor_model
 from .utils import DBDIR, checkInfo, getDiscID, loadData, saveData, file_from_discid
 
 EXTRATYPES = [ 
@@ -53,23 +54,23 @@ class BaseMetadata( QtWidgets.QWidget ):
         self.log = logging.getLogger( __name__ )
         layout = QtWidgets.QGridLayout()
 
-        self.title    = QtWidgets.QLineEdit()
-        self.year     = QtWidgets.QLineEdit()
-        self.tmdb     = QtWidgets.QLineEdit()
-        self.tvdb     = QtWidgets.QLineEdit()
-        self.imdb     = QtWidgets.QLineEdit()
+        self.title = QtWidgets.QLineEdit()
+        self.year = QtWidgets.QLineEdit()
+        self.tmdb = QtWidgets.QLineEdit()
+        self.tvdb = QtWidgets.QLineEdit()
+        self.imdb = QtWidgets.QLineEdit()
 
-        self.type     = QtWidgets.QComboBox( )
-        self.type.addItems( CONTENTTYPES )
+        self.type = QtWidgets.QComboBox()
+        self.type.addItems(CONTENTTYPES)
 
-        self.title.setPlaceholderText( 'Movie/Series Title' )
-        self.year.setPlaceholderText(  'Movie Released / Series First Aired' )
-        self.tmdb.setPlaceholderText(  'TheMovieDb ID' )
-        self.tvdb.setPlaceholderText(  'TheTVDb ID' )
-        self.imdb.setPlaceholderText(  'IMDb ID' )
+        self.title.setPlaceholderText('Movie/Series Title')
+        self.year.setPlaceholderText('Movie Released / Series First Aired')
+        self.tmdb.setPlaceholderText('TheMovieDb ID')
+        self.tvdb.setPlaceholderText('TheTVDb ID')
+        self.imdb.setPlaceholderText('IMDb ID')
 
-        layout.addWidget( self.title,     0, 0 )
-        layout.addWidget( self.year,      1, 0 )
+        layout.addWidget(self.title, 0, 0)
+        layout.addWidget(self.year, 1, 0)
 
         # Build wiget for the type of video (Movie/TV) 
         _layout  = QtWidgets.QHBoxLayout()
@@ -78,13 +79,13 @@ class BaseMetadata( QtWidgets.QWidget ):
         video_type = QtWidgets.QWidget()
         video_type.setLayout( _layout )
 
-        layout.addWidget( video_type, 2, 0 )
+        layout.addWidget(video_type, 2, 0)
 
-        layout.addWidget( self.tmdb,     0, 1 )
-        layout.addWidget( self.tvdb,     1, 1 )
-        layout.addWidget( self.imdb,     2, 1 )
+        layout.addWidget(self.tmdb, 0, 1)
+        layout.addWidget(self.tvdb, 1, 1)
+        layout.addWidget(self.imdb, 2, 1)
         
-        self.setLayout( layout )
+        self.setLayout(layout)
 
     def connect_parent(self, parent):
         """
@@ -414,7 +415,7 @@ class TitleMetadata( BaseMetadata ):
             
 class DiscDialog(QtWidgets.QDialog):
 
-    default_title = 'Title'
+    DEFAULT_TITLE = 'Title'
 
     def __init__(
         self,
@@ -429,14 +430,14 @@ class DiscDialog(QtWidgets.QDialog):
         super().__init__(*args, **kwargs)
 
         self.log = logging.getLogger( __name__ )
-        self.curTitle  = None
-        self.info      = None
-        self.sizes     = None
-        self.discDev   = discDev
-        self.discID    = getDiscID( discDev )
-        self.dbdir     = dbdir or DBDIR
+        self.curTitle = None
         self.discLabel = None
-
+        self.info = None
+        self.sizes = None
+        self.discDev = discDev
+        self.discID = getDiscID( discDev )
+        self.dbdir = dbdir or DBDIR
+        self.vendor, self.model = get_vendor_model(discDev)
         self.setWindowTitle()
 
         self.titleTree = QtWidgets.QTreeWidget()
@@ -529,14 +530,16 @@ class DiscDialog(QtWidgets.QDialog):
         self.accept()
         #self.reject()
 
-    def setWindowTitle( self ):
+    def setWindowTitle(self):
 
         title = f"{self.discDev} [{self.discID}]"
+        if self.vendor and self.model:
+            title = f"{self.vendor} {self.model}: {title}" 
         if self.discLabel:
             title = f"{title} - {self.discLabel}"
-        super().setWindowTitle( title )
+        super().setWindowTitle(title)
 
-    def open( self, *args, **kwargs ):
+    def open(self, *args, **kwargs):
 
         self.log.debug( 'Attempting to open disc JSON for editing' )
         dialog = QtWidgets.QFileDialog( directory=self.dbdir)
@@ -612,7 +615,9 @@ class DiscDialog(QtWidgets.QDialog):
 
         message = QtWidgets.QMessageBox()
         res     = message.question(
-                self, '', 'Are you sure the information is correct?',
+                self,
+                '',
+                'Are you sure the information is correct?',
                 message.Yes | message.No
         )
         if res == message.Yes:
@@ -693,10 +698,10 @@ class DiscDialog(QtWidgets.QDialog):
             # Used to update old files to contain the Segments Map
             #if 'Segments Map' not in title.info:
             #    title.info['Segments Map'] = titleInfo['Segments Map']
-            title.setText( 0, self.default_title)
-            title.setText( 1, titleInfo['Tree Info'] )
+            title.setText(0, self.DEFAULT_TITLE)
+            title.setText(1, titleInfo['Tree Info'])
 
-            title.setFlags( title.flags() | QtCore.Qt.ItemIsUserCheckable )
+            title.setFlags(title.flags() | QtCore.Qt.ItemIsUserCheckable)
 
             for streamID, streamInfo in titleInfo.pop('streams').items():
                 child = QtWidgets.QTreeWidgetItem(title)

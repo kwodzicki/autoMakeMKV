@@ -29,6 +29,9 @@ from .utils import video_utils_outfile
 KEY = 'DEVNAME'
 CHANGE = 'DISK_MEDIA_CHANGE'
 STATUS = "ID_CDROM_MEDIA_STATE"
+EJECT = "DISK_EJECT_REQUEST"  # This appears when initial eject requested
+READY = "SYSTEMD_READY"  # This appears when disc tray is out
+
 SIZE_POLL = 10
 
 RUNNING = Event()
@@ -175,36 +178,47 @@ class RipperWatchdog(QThread):
             if dev is None:
                 continue
 
-            # If we did NOT change an insert/eject event
-            if device.properties.get(CHANGE, None):
-                if device.properties.get(STATUS, '') != 'complete':
-                    msg = (
-                        'Caught event that was NOT insert/eject, '
-                        'ignoring : %s'
-                    )
-                    self.__log.debug(msg, dev)
-                    continue
-                self.__log.debug('Finished mounting : %s', dev)
-                self.MOUNT_SIGNAL.emit(dev)
-                self._mounted[dev] = None
+            if device.properties.get(EJECT, ''):
+                self.__log.debug("Eject requested: %s", dev)
+                self._ejecting(dev)
                 continue
 
-            # If dev is NOT in mounted, initialize to False
-            if dev not in self._mounted:
-                self.__log.info('Odd event : %s', dev)
+            if device.properties.get(READY, '') == '0':
+                self.__log.debug("Drive is ejectecd: %s", dev)
+                self._ejecting(dev)
                 continue
 
-            self.__log.info('Device has been ejected : %s', dev)
-            proc = self._mounted.pop(dev)
-            if proc.is_alive():
-                self.__log.warning('Killing the ripper process!')
-                proc.kill()
+            if device.properties.get(CHANGE, '') != '1':
+                self.__log.debug("Not a '%s' event, ignoring: %s", CHANGE, dev)
                 continue
 
-            self.__log.debug(
-                "Exitcode from ripping processes : %d",
-                proc.exitcode,
-            )
+            if device.properties.get(STATUS, '') != 'complete':
+                msg = (
+                    'Caught event that was NOT insert/eject, '
+                    'ignoring : %s'
+                )
+                self.__log.debug(msg, dev)
+                continue
+
+            self.__log.debug('Finished mounting : %s', dev)
+            self._mounted[dev] = None
+            self.MOUNT_SIGNAL.emit(dev)
+
+    def _ejecting(self, dev):
+
+        proc = self._mounted.pop(dev, None)
+        if proc is None:
+            return
+
+        if proc.isRunning():
+            self.__log.warning('Killing the ripper process!')
+            proc.kill()
+            return
+
+        self.__log.debug(
+            "Exitcode from ripping processes : %d",
+            proc.exitcode,
+        )
 
     def quit(self, *args, **kwargs):
         RUNNING.set()
@@ -455,7 +469,10 @@ class Ripper(QThread):
             os.rename(files[0], outfile)
             status = True
 
-        os.rmdir(tmpdir)
+        try:
+            os.rmdir(tmpdir)
+        except FileNotFoundError:
+            pass
 
         return status
 

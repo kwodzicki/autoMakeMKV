@@ -14,14 +14,16 @@ from PyQt5.QtWidgets import (
     QHBoxLayout,
 )
 
+from .. import NAME
 from .utils import load_settings, save_settings
 
 
 class MissingOutdirDialog(QDialog):
-    def __init__(self, outdir):
+    def __init__(self, outdir, name=NAME):
         super().__init__()
 
-        self.setWindowTitle("autoMakeMKV: Output Directory Missing!")
+        self._name = name
+        self.setWindowTitle(f"{self._name}: Output Directory Missing!")
 
         QBtn = QDialogButtonBox.Ok | QDialogButtonBox.Abort
 

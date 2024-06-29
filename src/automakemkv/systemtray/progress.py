@@ -153,7 +153,6 @@ class ProgressWidget(QFrame):
         return len(self.info)
 
     def cancel(self, *args, **kwargs):
-        print(args, kwargs)
 
         message = QMessageBox()
         res = message.question(

@@ -15,7 +15,7 @@ from PyQt5.QtWidgets import (
 )
 from PyQt5.QtCore import QTimer
 
-from .. import LOG, STREAM
+from .. import LOG, STREAM, NAME
 from ..ripper import RipperWatchdog
 
 from .progress import ProgressDialog
@@ -33,7 +33,7 @@ class SystemTray(QSystemTrayIcon):
 
     """
 
-    def __init__(self, app):
+    def __init__(self, app, name=NAME):
         icon = (
             QApplication
             .style()
@@ -44,11 +44,12 @@ class SystemTray(QSystemTrayIcon):
         super().__init__(icon, app)
 
         self.__log = logging.getLogger(__name__)
+        self._name = name
         self._settingsInfo = None
         self._app = app
         self._menu = QMenu()
 
-        self._label = QAction('autoMakeMKV')
+        self._label = QAction(self._name)
         self._label.setEnabled(False)
         self._menu.addAction(self._label)
 
@@ -108,7 +109,7 @@ class SystemTray(QSystemTrayIcon):
         msg = QMessageBox()
         msg.setIcon(QMessageBox.Warning)
         msg.setText("Are you sure you want to quit?")
-        msg.setWindowTitle("autoMakeMKV Quit")
+        msg.setWindowTitle(f"{self._name} Quit")
         msg.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
         res = msg.exec_()
         if res == QMessageBox.Yes:
@@ -131,7 +132,7 @@ class SystemTray(QSystemTrayIcon):
 
         path = QFileDialog.getExistingDirectory(
             QDialog(),
-            'autoMakeMKV: Select Output Folder',
+            f'{self._name}: Select Output Folder',
         )
         if path != '':
             self.ripper.outdir = path

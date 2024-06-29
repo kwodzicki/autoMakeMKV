@@ -20,7 +20,7 @@ from PyQt5.QtWidgets import (
     QGridLayout,
 )
 
-from PyQt5.QtCore import Qt, QTimer
+from PyQt5.QtCore import Qt, QTimer, pyqtSignal
 
 from ..makemkv import MakeMKVInfo
 from ..utils import get_vendor_model
@@ -455,13 +455,30 @@ class TitleMetadata(BaseMetadata):
         self.extra.addItems(EXTRATYPES)
 
 
-class DiscDialog(QDialog):
+class MyQDialog(QDialog):
+    """
+    Overload done() and new signal
+
+    Create a new FINISHED signal that will pass bot the result code and
+    the dev device. This signal is emitted in the overloaded done() method.
+
+    """
+
+    FINISHED = pyqtSignal(int, str)
+
+    def done(self, arg):
+
+        super().done(arg)
+        self.FINISHED.emit(self.result(), self.dev)
+
+
+class DiscDialog(MyQDialog):
 
     DEFAULT_TITLE = 'Title'
 
     def __init__(
         self,
-        discDev,
+        dev,
         *args,
         debug=False,
         dbdir=None,
@@ -476,10 +493,10 @@ class DiscDialog(QDialog):
         self.discLabel = None
         self.info = None
         self.sizes = None
-        self.discDev = discDev
-        self.discID = getDiscID(discDev)
+        self.dev = dev
+        self.discID = getDiscID(dev)
         self.dbdir = dbdir or DBDIR
-        self.vendor, self.model = get_vendor_model(discDev)
+        self.vendor, self.model = get_vendor_model(dev)
         self.setWindowTitle()
 
         self.titleTree = QTreeWidget()
@@ -522,7 +539,7 @@ class DiscDialog(QDialog):
         self.setLayout(layout)
         self.resize(720, 720)
 
-        self.loadDisc = MakeMKVInfo(discDev, debug=debug, dbdir=self.dbdir)
+        self.loadDisc = MakeMKVInfo(dev, debug=debug, dbdir=self.dbdir)
         self.loadDisc.signal.connect(self.msgs.append)
         self.loadDisc.finished.connect(self.buildTitleTree)
         if discid is not None:
@@ -562,7 +579,7 @@ class DiscDialog(QDialog):
 
     def setWindowTitle(self):
 
-        title = f"{self.discDev} [{self.discID}]"
+        title = f"{self.dev} [{self.discID}]"
         if self.vendor and self.model:
             title = f"{self.vendor} {self.model}: {title}"
         if self.discLabel:
@@ -757,7 +774,7 @@ class DiscDialog(QDialog):
         self.rip_but.setEnabled(True)
 
 
-class ExistingDiscOptions(QDialog):
+class ExistingDiscOptions(MyQDialog):
     """
     Dialog with timeout for discs in database
 
@@ -775,9 +792,10 @@ class ExistingDiscOptions(QDialog):
 
     """
 
-    def __init__(self, parent=None, timeout=30):
+    def __init__(self, dev, parent=None, timeout=30):
         super().__init__(parent)
 
+        self.dev = dev
         self._timeout = timeout
         qbtn = (
             QDialogButtonBox.Save

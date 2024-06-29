@@ -5,6 +5,8 @@ import os
 
 UUID_ROOT = "/dev/disk/by-uuid"
 
+NAME = 'autoMakeMKV'
+
 HOMEDIR = os.path.expanduser('~')
 DBDIR = os.path.join(
     HOMEDIR,

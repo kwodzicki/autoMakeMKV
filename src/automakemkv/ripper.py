@@ -215,10 +215,10 @@ class RipperWatchdog(QThread):
             proc.kill()
             return
 
-        self.__log.debug(
-            "Exitcode from ripping processes : %d",
-            proc.exitcode,
-        )
+        # self.__log.debug(
+        #     "Exitcode from ripping processes : %d",
+        #     proc.exitcode,
+        # )
 
     def quit(self, *args, **kwargs):
         RUNNING.set()
@@ -252,11 +252,11 @@ class RipperWatchdog(QThread):
 
         # Update mounted information and run rip_disc
         self._mounted[dev] = (info, sizes)
-        self.options_dialog = ExistingDiscOptions()
-        self.options_dialog.finished.connect(self.handle_disc_info)
+        self.options_dialog = ExistingDiscOptions(dev)
+        self.options_dialog.FINISHED.connect(self.handle_disc_info)
 
-    @pyqtSlot(int)
-    def handle_disc_info(self, result):
+    @pyqtSlot(int, str)
+    def handle_disc_info(self, result, dev):
         """
         Rip a whole disc
 
@@ -274,40 +274,37 @@ class RipperWatchdog(QThread):
 
         """
 
-        # Get list of keys for mounted devices, then iterate over them
-        devs = list(self._mounted.keys())
-        for dev in devs:
-            # Try to pop of information
-            disc_info = self._mounted.pop(dev, None)
-            if disc_info is None:
-                continue
+        # Try to pop of information
+        disc_info = self._mounted.pop(dev, None)
+        if disc_info is None:
+            return
 
-            # Check the "return" status of the dialog
-            if result == IGNORE:
-                self.__log.info('Ignoring disc: %s', dev)
-                return
+        # Check the "return" status of the dialog
+        if result == IGNORE:
+            self.__log.info('Ignoring disc: %s', dev)
+            return
 
-            # Get information about disc
-            if isinstance(disc_info, tuple):
-                info, sizes = disc_info
-            else:
-                info, sizes = disc_info.info, disc_info.sizes
+        # Get information about disc
+        if isinstance(disc_info, tuple):
+            info, sizes = disc_info
+        else:
+            info, sizes = disc_info.info, disc_info.sizes
 
-            # Initialize ripper object
-            if result == RIP:
-                self.rip_disc(dev, info, sizes)
-                return
+        # Initialize ripper object
+        if result == RIP:
+            self.rip_disc(dev, info, sizes)
+            return
 
-            if result == SAVE:
-                self.__log.info("Requested metadata save and eject: %s", dev)
-                subprocess.call(['eject', dev])
-                return
+        if result == SAVE:
+            self.__log.info("Requested metadata save and eject: %s", dev)
+            subprocess.call(['eject', dev])
+            return
 
-            if result == OPEN:
-                self.disc_dialog(dev, discid=getDiscID(dev, self.root))
-                return
+        if result == OPEN:
+            self.disc_dialog(dev, discid=getDiscID(dev, self.root))
+            return
 
-            self.__log.error("Unrecognized option: %d", result)
+        self.__log.error("Unrecognized option: %d", result)
 
     def disc_dialog(self, dev, discid=None):
 
@@ -317,7 +314,7 @@ class RipperWatchdog(QThread):
             dbdir=self.dbdir,
             discid=discid,
         )
-        dialog.finished.connect(self.handle_disc_info)
+        dialog.FINISHED.connect(self.handle_disc_info)
         self._mounted[dev] = dialog
 
     def rip_disc(self, dev, info, sizes):
@@ -480,8 +477,11 @@ class Ripper(QThread):
         self.rip_disc()
         subprocess.call(['eject', self.dev])
 
-    @pyqtSlot()
-    def kill(self):
+    @pyqtSlot(str)
+    def kill(self, dev):
+        if dev != self.dev:
+            return
+
         self._dead = True
         if self.mkv_thread is None:
             return

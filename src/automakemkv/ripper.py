@@ -475,6 +475,7 @@ class Ripper(QThread):
 
     def run(self):
         self.rip_disc()
+        self.progress.REMOVE_DISC.emit(self.dev)
         subprocess.call(['eject', self.dev])
 
     @pyqtSlot(str)

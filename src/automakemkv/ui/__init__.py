@@ -1,5 +1,5 @@
 from .. import STREAM
-from .gui import DiscDialog
+from . import metadata
 
 
 def cli():
@@ -27,5 +27,5 @@ def cli():
     args = parser.parse_args()
     STREAM.setLevel(args.loglevel)
     app = QApplication(sys.argv)
-    DiscDialog(args.discdev)
+    metadata.DiscMetadataEditor(args.discdev)
     app.exec_()

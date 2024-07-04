@@ -12,8 +12,8 @@ from subprocess import Popen, PIPE, STDOUT
 
 from PyQt5 import QtCore
 
+from . import DBDIR
 from .mkv_lookup import AP
-from .mediaInfo import utils
 
 SPLIT = re.compile(r'(".*?"|[^,]+)')
 
@@ -126,21 +126,26 @@ class MakeMKVInfo(MakeMKVThread):
 
     def __init__(
         self,
-        source: str = '/dev/sr0',
+        dev: str,
+        discid: str,
         dbdir: str | None = None,
-        debug: bool = False,
         **kwargs,
     ):
         super().__init__(
             "info",
-            f"dev:{source}",
+            f"dev:{dev}",
             minlength=0,
             robot=True,
             **kwargs,
         )
 
-        self._debug = debug
-        self.info_path = utils.info_path(source, dbdir=dbdir)
+        self.dev = dev
+        self.discid = discid
+        self.info_path = os.path.join(
+            dbdir or DBDIR,
+            f"{dev}.info.gz",
+        )
+
         self.discInfo = {}
         self.titles = {}
 

@@ -1,34 +1,25 @@
 import logging
 
-from PyQt5.QtWidgets import (
-    QWidget,
-    QProgressBar,
-    QLabel,
-    QPushButton,
-    QMessageBox,
-    QVBoxLayout,
-    QGridLayout,
-    QFrame,
-)
-from PyQt5.QtCore import Qt, pyqtSlot, pyqtSignal
+from PyQt5 import QtWidgets
+from PyQt5 import QtCore
 
-from ..utils import get_vendor_model
+from . import utils
 
 MEGABYTE = 10**6
 
 
-class ProgressDialog(QWidget):
+class ProgressDialog(QtWidgets.QWidget):
 
     # First arg in dev, second is all info
-    ADD_DISC = pyqtSignal(str, dict)
+    ADD_DISC = QtCore.pyqtSignal(str, dict)
     # Arg is dev of disc to remove
-    REMOVE_DISC = pyqtSignal(str)
+    REMOVE_DISC = QtCore.pyqtSignal(str)
     # First arg is dev, second is track num
-    CUR_TRACK = pyqtSignal(str, str)
+    CUR_TRACK = QtCore.pyqtSignal(str, str)
     # First arg is dev, second is size of cur track
-    TRACK_SIZE = pyqtSignal(str, int)
+    TRACK_SIZE = QtCore.pyqtSignal(str, int)
     # dev of the rip to cancel
-    CANCEL = pyqtSignal(str)
+    CANCEL = QtCore.pyqtSignal(str)
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -38,11 +29,11 @@ class ProgressDialog(QWidget):
 
         self.setWindowFlags(
             self.windowFlags()
-            & ~Qt.WindowCloseButtonHint
+            & ~QtCore.Qt.WindowCloseButtonHint
         )
 
         self.widgets = {}
-        self.layout = QVBoxLayout()
+        self.layout = QtWidgets.QVBoxLayout()
         self.setLayout(self.layout)
 
         self.ADD_DISC.connect(self.add_disc)
@@ -53,7 +44,7 @@ class ProgressDialog(QWidget):
     def __len__(self):
         return len(self.widgets)
 
-    @pyqtSlot(str, dict)
+    @QtCore.pyqtSlot(str, dict)
     def add_disc(self, dev: str, info: dict):
         self.log.debug("Adding disc: %s", dev)
         widget = ProgressWidget(dev, info)
@@ -63,7 +54,7 @@ class ProgressDialog(QWidget):
         self.widgets[dev] = widget
         self.show()
 
-    @pyqtSlot(str)
+    @QtCore.pyqtSlot(str)
     def remove_disc(self, dev: str):
         self.log.debug("Removing disc: %s", dev)
         widget = self.widgets.pop(dev, None)
@@ -73,7 +64,7 @@ class ProgressDialog(QWidget):
         if len(self.widgets) == 0:
             self.setVisible(False)
 
-    @pyqtSlot(str, str)
+    @QtCore.pyqtSlot(str, str)
     def current_track(self, dev: str, title: str):
         self.log.debug("Setting current track: %s - %s", dev, title)
         widget = self.widgets.get(dev, None)
@@ -81,7 +72,7 @@ class ProgressDialog(QWidget):
             return
         widget.current_track(title)
 
-    @pyqtSlot(str, int)
+    @QtCore.pyqtSlot(str, int)
     def track_size(self, dev, tsize):
         self.log.debug("Update current track size: %s - %d", dev, tsize)
         widget = self.widgets.get(dev, None)
@@ -89,13 +80,13 @@ class ProgressDialog(QWidget):
             return
         widget.track_size(tsize)
 
-    @pyqtSlot(str)
+    @QtCore.pyqtSlot(str)
     def cancel(self, dev):
         self.CANCEL.emit(dev)
         self.REMOVE_DISC.emit(dev)
 
 
-class ProgressWidget(QFrame):
+class ProgressWidget(QtWidgets.QFrame):
     """
     Progress for a single disc
 
@@ -105,13 +96,13 @@ class ProgressWidget(QFrame):
 
     """
 
-    CANCEL = pyqtSignal(str)  # dev to cancel rip of
+    CANCEL = QtCore.pyqtSignal(str)  # dev to cancel rip of
 
     def __init__(self, dev, info):
         super().__init__()
 
         self.setFrameStyle(
-            QFrame.StyledPanel | QFrame.Plain
+            QtWidgets.QFrame.StyledPanel | QtWidgets.QFrame.Plain
         )
         self.setLineWidth(1)
 
@@ -124,21 +115,21 @@ class ProgressWidget(QFrame):
             sum(t.get('size', 0) for t in info.values())
         )
 
-        vendor, model = get_vendor_model(dev)
-        self.title = QLabel(f"{vendor} {model} : {dev}")
-        self.track_label = QLabel('')
-        self.track_count = QLabel('')
-        self.track_prog = QProgressBar()
+        vendor, model = utils.get_vendor_model(dev)
+        self.title = QtWidgets.QLabel(f"{vendor} {model} : {dev}")
+        self.track_label = QtWidgets.QLabel('')
+        self.track_count = QtWidgets.QLabel('')
+        self.track_prog = QtWidgets.QProgressBar()
 
-        self.disc_label = QLabel('Overall Progress')
-        self.disc_prog = QProgressBar()
+        self.disc_label = QtWidgets.QLabel('Overall Progress')
+        self.disc_prog = QtWidgets.QProgressBar()
         self.disc_prog.setRange(0, tot_size)
         self.disc_prog.setValue(0)
 
-        self.cancel_but = QPushButton("Cancel Rip")
+        self.cancel_but = QtWidgets.QPushButton("Cancel Rip")
         self.cancel_but.clicked.connect(self.cancel)
 
-        layout = QGridLayout()
+        layout = QtWidgets.QGridLayout()
         layout.addWidget(self.title, 0, 0, 1, 3)
         layout.addWidget(self.track_label, 10, 0)
         layout.addWidget(self.track_count, 10, 2)
@@ -154,7 +145,7 @@ class ProgressWidget(QFrame):
 
     def cancel(self, *args, **kwargs):
 
-        message = QMessageBox()
+        message = QtWidgets.QMessageBox()
         res = message.question(
             self,
             '',

@@ -8,6 +8,7 @@ UUID_ROOT = "/dev/disk/by-uuid"
 NAME = 'autoMakeMKV'
 
 HOMEDIR = os.path.expanduser('~')
+OUTDIR = os.path.join(HOMEDIR, 'Videos')
 DBDIR = os.path.join(
     HOMEDIR,
     f".{__name__}DB",

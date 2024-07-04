@@ -4,88 +4,40 @@ Utilities for ripping titles
 """
 
 import logging
-import argparse
+from collections.abc import Callable
 import os
-import signal
 import subprocess
-from threading import Event
-from PyQt5.QtCore import QThread, pyqtSignal, pyqtSlot
+from PyQt5 import QtCore
 
-import pyudev
-
-from . import UUID_ROOT, DBDIR, LOG, STREAM
-from .mediaInfo.gui import (
-    DiscDialog,
-    ExistingDiscOptions,
-    RIP,
-    SAVE,
-    OPEN,
-    IGNORE,
-)
-from .mediaInfo.utils import getDiscID, loadData
-from .makemkv import MakeMKVRip
-from .utils import video_utils_outfile
-
-KEY = 'DEVNAME'
-CHANGE = 'DISK_MEDIA_CHANGE'
-STATUS = "ID_CDROM_MEDIA_STATE"
-EJECT = "DISK_EJECT_REQUEST"  # This appears when initial eject requested
-READY = "SYSTEMD_READY"  # This appears when disc tray is out
+from . import utils
+from . import makemkv
+from .ui import metadata
 
 SIZE_POLL = 10
 
-RUNNING = Event()
 
-signal.signal(signal.SIGINT, lambda *args: RUNNING.set())
-signal.signal(signal.SIGTERM, lambda *args: RUNNING.set())
-
-
-class RipperWatchdog(QThread):
+class DiscHandler(QtCore.QObject):
     """
-    Main watchdog for disc monitoring/ripping
-
-    This function will run a pyudev monitor instance,
-    looking for changes in disc. On change, will
-    spawn the DiscDialog widget loading
-    information from the database if exists, or
-    prompting using for information via a GUI.
-
-    After information is obtained, a rip of the
-    requested/flagged tracks will start.
-
-    The logic for disc mounting is a bit obtuse, so will try to explain.
-    When the disc is initially inserted, it should trigger an event where
-    the CHANGE property is set. As the dev should NOT be in mounted list,
-    we add it to the mounting list. The next event for that dev is the event
-    that the disc is fully mounted. This will NOT have the CHANGE property.
-    As the disc is still in the mounting list at this point, will NOT enter
-    the if-statement there and will remove dev from mounting list, add dev
-    to mounted list, and then run the ripping process.
-
-    On future calls without the CHANGE property, the dev will NOT be in
-    the mounting list, so we will just skip them. For an event WITH the
-    CHANGE property, since the dev IS in the mounted list, we remove it
-    from the mounted list and log information that it has been ejected.
+    Handle new disc event
 
     """
-
-    MOUNT_SIGNAL = pyqtSignal(str)
 
     def __init__(
         self,
-        outdir,
-        everything=False,
-        extras=False,
-        root=UUID_ROOT,
-        fileGen=video_utils_outfile,
-        progress_dialog=None,
+        dev: str,
+        outdir: str,
+        everything: bool,
+        extras: bool,
+        dbdir: str,
+        root: str,
+        filegen: Callable,
+        progress_dialog,
         **kwargs,
     ):
         """
         Arguments:
+            dev (str): Dev device
             outdir (str) : Top-level directory for ripping files
-
-        Keyword arguments:
             everything (bool) : If set, then all titles identified
                 for ripping will be ripped. By default, only the
                 main feature will be ripped
@@ -96,7 +48,7 @@ class RipperWatchdog(QThread):
             root (str) : Location of the 'by-uuid' directory
                 where discs are mounted. This is used to
                 get the unique ID of the disc.
-            fileGen (func) : Function to use to generate
+            filegen (func) : Function to use to generate
                 output file names based on information
                 from the database. This function must
                 accept (outdir, info, extras=bool), where info is
@@ -107,124 +59,59 @@ class RipperWatchdog(QThread):
         """
 
         super().__init__()
-        self.__log = logging.getLogger(__name__)
-        self.__log.debug("%s started", __name__)
+        self.log = logging.getLogger(__name__)
 
-        self.MOUNT_SIGNAL.connect(self.get_disc_info)
-
-        self._outdir = None
-
-        self.dbdir = kwargs.get('dbdir', DBDIR)
+        self.dev = dev
+        self.discid = utils.get_discid(dev, root)
         self.outdir = outdir
         self.everything = everything
         self.extras = extras
+        self.dbdir = dbdir
         self.root = root
-        self.fileGen = fileGen
+        self.filegen = filegen
         self.progress_dialog = progress_dialog
 
-        self._mounting = {}
-        self._mounted = {}
-        self._context = pyudev.Context()
-        self._monitor = pyudev.Monitor.from_netlink(self._context)
-        self._monitor.filter_by(subsystem='block')
+        self.options = None
+        self.metadata = None
+        self.ripper = None
 
-    @property
-    def outdir(self):
-        return self._outdir
+        self.info = None
+        self.sizes = None
 
-    @outdir.setter
-    def outdir(self, val):
-        self.__log.info('Output directory set to : %s', val)
-        self._outdir = val
+        self.disc_lookup(self.dev)
 
-    def set_settings(self, **kwargs):
+    def isRunning(self):
         """
-        Set options for ripping discs
+        Check if is running
 
         """
 
-        self.__log.debug('Updating ripping options')
-        self.dbdir = kwargs.get('dbdir', self.dbdir)
-        self.outdir = kwargs.get('outdir', self.outdir)
-        self.everything = kwargs.get('everything', self.everything)
-        self.extras = kwargs.get('extras', self.extras)
+        # If ripper not yet defined, still going through motions
+        # i.e., running
+        if self.ripper is None:
+            return True
 
-    def get_settings(self):
+        # Else, return status of the ripper
+        return self.ripper.isRunning()
 
-        return {
-            'dbdir': self.dbdir,
-            'outdir': self.outdir,
-            'everything': self.everything,
-            'extras': self.extras,
-        }
-
-    def run(self):
+    def terminate(self):
         """
-        Processing for thread
-
-        Polls udev for device changes, running MakeMKV pipelines
-        when dvd/bluray found
+        Kill/close all objects
 
         """
 
-        self.__log.info('Watchdog thread started')
-        while not RUNNING.is_set():
-            device = self._monitor.poll(timeout=1.0)
-            if device is None:
-                continue
+        if self.options is not None:
+            self.options.close()
+            self.options = None
+        if self.metadata is not None:
+            self.metadata.close()
+            self.metadata = None
+        if self.ripper is not None:
+            self.ripper.terminate()
+            self.ripper = None
 
-            # Get value for KEY. If is None, then did not exist, so continue
-            dev = device.properties.get(KEY, None)
-            if dev is None:
-                continue
-
-            if device.properties.get(EJECT, ''):
-                self.__log.debug("Eject requested: %s", dev)
-                self._ejecting(dev)
-                continue
-
-            if device.properties.get(READY, '') == '0':
-                self.__log.debug("Drive is ejectecd: %s", dev)
-                self._ejecting(dev)
-                continue
-
-            if device.properties.get(CHANGE, '') != '1':
-                self.__log.debug("Not a '%s' event, ignoring: %s", CHANGE, dev)
-                continue
-
-            if device.properties.get(STATUS, '') != 'complete':
-                msg = (
-                    'Caught event that was NOT insert/eject, '
-                    'ignoring : %s'
-                )
-                self.__log.debug(msg, dev)
-                continue
-
-            self.__log.debug('Finished mounting : %s', dev)
-            self._mounted[dev] = None
-            self.MOUNT_SIGNAL.emit(dev)
-
-    def _ejecting(self, dev):
-
-        proc = self._mounted.pop(dev, None)
-        if proc is None:
-            return
-
-        if proc.isRunning():
-            self.__log.warning('Killing the ripper process!')
-            proc.kill()
-            return
-
-        # self.__log.debug(
-        #     "Exitcode from ripping processes : %d",
-        #     proc.exitcode,
-        # )
-
-    def quit(self, *args, **kwargs):
-        RUNNING.set()
-
-    @pyqtSlot(str)
-    def get_disc_info(self, dev):
+    @QtCore.pyqtSlot(str)
+    def disc_lookup(self, dev: str):
         """
         Get information about a disc
 
@@ -236,27 +123,45 @@ class RipperWatchdog(QThread):
 
         """
 
-        # Attept to get UUID of disc
-        uuid = getDiscID(dev, self.root)
-        if uuid is None:
-            self.__log.info("No UUID found for disc: %s", dev)
+        if dev != self.dev:
+            return
+
+        if self.discid is None:
+            self.log.info("%s - No UUID found for disc, ignoring", dev)
             return
 
         # Get title informaiton for tracks to rip
-        self.__log.info("UUID of disc: %s", uuid)
-        info, sizes = loadData(discID=uuid)
+        self.log.info("%s - UUID of disc: %s", dev, self.discid)
+        info, sizes = metadata.utils.load_metadata(discid=self.discid)
+
+        # Open dics metadata GUI and register "callback" for when closes
         if info is None:
-            # Open dics metadata GUI and register "callback" for when closes
-            self.disc_dialog(dev)
+            self.disc_metadata_dialog(dev, False)
             return
 
         # Update mounted information and run rip_disc
-        self._mounted[dev] = (info, sizes)
-        self.options_dialog = ExistingDiscOptions(dev)
-        self.options_dialog.FINISHED.connect(self.handle_disc_info)
+        self.info = info
+        self.sizes = sizes
+        self.options = metadata.ExistingDiscOptions(dev)
+        self.options.FINISHED.connect(self.handle_metadata)
 
-    @pyqtSlot(int, str)
-    def handle_disc_info(self, result, dev):
+    @QtCore.pyqtSlot(str, bool)
+    def disc_metadata_dialog(self, dev: str, load_existing: bool = False):
+
+        if dev != self.dev:
+            return
+
+        # Open dics metadata GUI and register "callback" for when closes
+        self.metadata = metadata.DiscMetadataEditor(
+            dev,
+            self.discid,
+            self.dbdir,
+            load_existing=load_existing,
+        )
+        self.metadata.FINISHED.connect(self.handle_metadata)
+
+    @QtCore.pyqtSlot(str, int)
+    def handle_metadata(self, dev: str, result: int):
         """
         Rip a whole disc
 
@@ -274,67 +179,62 @@ class RipperWatchdog(QThread):
 
         """
 
-        # Try to pop of information
-        disc_info = self._mounted.pop(dev, None)
-        if disc_info is None:
+        if dev != self.dev:
             return
 
         # Check the "return" status of the dialog
-        if result == IGNORE:
-            self.__log.info('Ignoring disc: %s', dev)
+        if result == metadata.IGNORE:
+            self.log.info("%s - Ignoring disc", dev)
             return
 
-        # Get information about disc
-        if isinstance(disc_info, tuple):
-            info, sizes = disc_info
-        else:
-            info, sizes = disc_info.info, disc_info.sizes
-
-        # Initialize ripper object
-        if result == RIP:
-            self.rip_disc(dev, info, sizes)
-            return
-
-        if result == SAVE:
-            self.__log.info("Requested metadata save and eject: %s", dev)
+        # Data already saved to disc by the metadata editor
+        if result == metadata.SAVE:
+            self.log.info("Requested metadata save and eject: %s", dev)
             subprocess.call(['eject', dev])
             return
 
-        if result == OPEN:
-            self.disc_dialog(dev, discid=getDiscID(dev, self.root))
+        if result == metadata.OPEN:
+            self.disc_metadata_dialog(dev, True)
             return
 
-        self.__log.error("Unrecognized option: %d", result)
-
-    def disc_dialog(self, dev, discid=None):
-
-        # Open dics metadata GUI and register "callback" for when closes
-        dialog = DiscDialog(
-            dev,
-            dbdir=self.dbdir,
-            discid=discid,
-        )
-        dialog.FINISHED.connect(self.handle_disc_info)
-        self._mounted[dev] = dialog
-
-    def rip_disc(self, dev, info, sizes):
+        # If metadata attribute is not None, then must be new disc or
+        # the user edited/updated something
+        if self.metadata is not None:
+            self.info = self.metadata.info
+            self.sizes = self.metadata.sizes
 
         # Initialize ripper object
-        ripper = Ripper(
-            dev,
-            info,
-            sizes,
-            self.fileGen,
-            self.get_settings(),
-            progress=self.progress_dialog,
-        )
-        ripper.start()
-        self._mounted[dev] = ripper
+        if result == metadata.RIP:
+            self.ripper = Ripper(
+                dev,
+                self.info,
+                self.sizes,
+                self.outdir,
+                self.everything,
+                self.extras,
+                self.filegen,
+                self.progress_dialog,
+            )
+            self.ripper.start()
+            return
+
+        self.log.error("Unrecognized option: %d", result)
 
 
-class Ripper(QThread):
+class Ripper(QtCore.QThread):
 
-    def __init__(self, dev, info, sizes, fileGen, settings, progress=None):
+    def __init__(
+        self,
+        dev: str,
+        info: dict,
+        sizes: dict,
+        outdir: str,
+        everything: bool,
+        extras: bool,        
+        filegen: Callable,
+        progress,
+    ):
+
         super().__init__()
         self.log = logging.getLogger(__name__)
 
@@ -342,29 +242,29 @@ class Ripper(QThread):
         self.dev = dev
         self.info = info
         self.sizes = sizes
-        self.fileGen = fileGen
-        self.settings = settings
+        self.outdir = outdir
+        self.everything = everything
+        self.extras = extras
+        self.filegen = filegen
         self.progress = progress
 
-        self.progress.CANCEL.connect(self.kill)
-
-        self.logthread = None
+        self.progress.CANCEL.connect(self.terminate)
 
     def rip_disc(self):
 
         if self.info is None:
-            self.log.error("No title information found/entered : %s", self.dev)
+            self.log.error("%s - No title information found/entered", self.dev)
             return
 
         if self.info == 'skiprip':
-            self.log.info("Just saving metadata, not ripping : %s", self.dev)
+            self.log.info("%s - Just saving metadata, not ripping", self.dev)
             return
 
-        filegen = self.fileGen(
-            self.settings['outdir'],
+        filegen = self.filegen(
+            self.outdir,
             self.info,
-            everything=self.settings['everything'],
-            extras=self.settings['extras'],
+            everything=self.everything,
+            extras=self.extras,
         )
 
         info = {
@@ -375,9 +275,8 @@ class Ripper(QThread):
             for title, fpath in filegen
         }
 
-        if self.progress is not None:
-            self.log.info('Emitting add disc signal')
-            self.progress.ADD_DISC.emit(self.dev, info)
+        self.log.info('Emitting add disc signal')
+        self.progress.ADD_DISC.emit(self.dev, info)
 
         for title, info in info.items():
             self.rip_title(title, info['path'])
@@ -415,7 +314,7 @@ class Ripper(QThread):
             self.progress.CUR_TRACK.emit(self.dev, title)
 
         self.log.info("[%s - %s] Ripping track", self.dev, title)
-        self.mkv_thread = MakeMKVRip(
+        self.mkv_thread = makemkv.MakeMKVRip(
             self.dev,
             title,
             tmpdir,
@@ -424,16 +323,21 @@ class Ripper(QThread):
         )
         self.mkv_thread.start()
 
-        while (
-            not RUNNING.wait(timeout=SIZE_POLL)
-            and self.mkv_thread.isRunning()
-        ):
-            if self.progress is None:
-                continue
+        # while (
+        #     not RUNNING.wait(timeout=SIZE_POLL)
+        #     and self.mkv_thread.isRunning()
+        # ):
+
+        while self.mkv_thread.isRunning():
             self.progress.TRACK_SIZE.emit(self.dev, directory_size(tmpdir))
 
-        if RUNNING.is_set():
-            self.mkv_thread.quit()
+        # if RUNNING.is_set():
+        #     self.mkv_thread.quit()
+        #     self.mkv_thread.wait()
+        #     return
+
+        if self._dead:
+            self.mkv_thread.terminate()
             self.mkv_thread.wait()
             return
 
@@ -478,15 +382,15 @@ class Ripper(QThread):
         self.progress.REMOVE_DISC.emit(self.dev)
         subprocess.call(['eject', self.dev])
 
-    @pyqtSlot(str)
-    def kill(self, dev):
+    @QtCore.pyqtSlot(str)
+    def terminate(self, dev):
         if dev != self.dev:
             return
 
         self._dead = True
         if self.mkv_thread is None:
             return
-        self.mkv_thread.quit()
+        self.mkv_thread.terminate()
 
 
 def directory_size(path):
@@ -500,39 +404,3 @@ def directory_size(path):
         for d in os.scandir(path)
         if d.is_file()
     )
-
-
-def cli():
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        'outdir',
-        type=str,
-        help='Directory to save ripped titles to',
-    )
-    parser.add_argument(
-        '--loglevel',
-        type=int,
-        default=30,
-        help='Set logging level',
-    )
-    parser.add_argument(
-        '--all',
-        action='store_true',
-        help="If set, all tiltes (main and extra) will be ripped",
-    )
-    parser.add_argument(
-        '--extras',
-        action='store_true',
-        help="If set, only 'extra' titles will be ripped",
-    )
-
-    args = parser.parse_args()
-
-    STREAM.setLevel(args.loglevel)
-    LOG.addHandler(STREAM)
-    watchdog = RipperWatchdog(
-        args.outdir,
-        everything=args.all,
-        extras=args.extras,
-    )
-    watchdog.start()

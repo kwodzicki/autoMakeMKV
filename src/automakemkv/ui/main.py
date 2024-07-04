@@ -3,31 +3,17 @@ import sys
 import os
 import argparse
 
-from PyQt5.QtWidgets import (
-    QApplication,
-    QSystemTrayIcon,
-    QFileDialog,
-    QDialog,
-    QMessageBox,
-    QMenu,
-    QAction,
-    QStyle,
-)
-from PyQt5.QtCore import QTimer
+from PyQt5 import QtWidgets
+from PyQt5 import QtCore
 
 from .. import LOG, STREAM, NAME
-from ..ripper import RipperWatchdog
-
-from .progress import ProgressDialog
-from .widgets import (
-    MissingOutdirDialog,
-    SettingsWidget,
-)
-
-from .utils import load_settings, save_settings
+from .. import udev_watchdog
+from . import progress
+from . import dialogs
+from . import utils
 
 
-class SystemTray(QSystemTrayIcon):
+class SystemTray(QtWidgets.QSystemTrayIcon):
     """
     System tray class
 
@@ -35,10 +21,11 @@ class SystemTray(QSystemTrayIcon):
 
     def __init__(self, app, name=NAME):
         icon = (
-            QApplication
+            QtWidgets
+            .QApplication
             .style()
             .standardIcon(
-                QStyle.SP_DriveDVDIcon
+                QtWidgets.QStyle.SP_DriveDVDIcon
             )
         )
         super().__init__(icon, app)
@@ -47,39 +34,39 @@ class SystemTray(QSystemTrayIcon):
         self._name = name
         self._settingsInfo = None
         self._app = app
-        self._menu = QMenu()
+        self._menu = QtWidgets.QMenu()
 
-        self._label = QAction(self._name)
+        self._label = QtWidgets.QAction(self._name)
         self._label.setEnabled(False)
         self._menu.addAction(self._label)
 
         self._menu.addSeparator()
 
-        self._settings = QAction('Settings')
+        self._settings = QtWidgets.QAction('Settings')
         self._settings.triggered.connect(self.settings_widget)
         self._menu.addAction(self._settings)
 
         self._menu.addSeparator()
 
-        self._quit = QAction('Quit')
+        self._quit = QtWidgets.QAction('Quit')
         self._quit.triggered.connect(self.quit)
         self._menu.addAction(self._quit)
 
         self.setContextMenu(self._menu)
         self.setVisible(True)
 
-        settings = load_settings()
+        settings = utils.load_settings()
 
-        self.progress = ProgressDialog()
-        self.ripper = RipperWatchdog(
-            progress_dialog=self.progress,
+        self.progress = progress.ProgressDialog()
+        self.ripper = udev_watchdog.UdevWatchdog(
+            self.progress,
             **settings,
         )
         self.ripper.start()
 
         # Set up check of output directory exists to run right after event
         # loop starts
-        QTimer.singleShot(
+        QtCore.QTimer.singleShot(
             0,
             self.check_outdir_exists,
         )
@@ -87,7 +74,7 @@ class SystemTray(QSystemTrayIcon):
     def settings_widget(self, *args, **kwargs):
 
         self.__log.debug('opening settings')
-        settings_widget = SettingsWidget()
+        settings_widget = dialogs.SettingsWidget()
         if settings_widget.exec_():
             self.ripper.set_settings(
                 **settings_widget.get_settings(),
@@ -97,7 +84,7 @@ class SystemTray(QSystemTrayIcon):
         """Display quit confirm dialog"""
         self.__log.info('Saving settings')
 
-        save_settings(
+        utils.save_settings(
             self.ripper.get_settings(),
         )
 
@@ -106,13 +93,16 @@ class SystemTray(QSystemTrayIcon):
             self.ripper.quit()
             self._app.quit()
 
-        msg = QMessageBox()
-        msg.setIcon(QMessageBox.Warning)
+        msg = QtWidgets.QMessageBox()
+        msg.setIcon(QtWidgets.QMessageBox.Warning)
         msg.setText("Are you sure you want to quit?")
         msg.setWindowTitle(f"{self._name} Quit")
-        msg.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+        msg.setStandardButtons(
+            QtWidgets.QMessageBox.Yes
+            | QtWidgets.QMessageBox.No
+        )
         res = msg.exec_()
-        if res == QMessageBox.Yes:
+        if res == QtWidgets.QMessageBox.Yes:
             self.ripper.quit()
             self._app.quit()
 
@@ -125,18 +115,18 @@ class SystemTray(QSystemTrayIcon):
         if os.path.isdir(self.ripper.outdir):
             return
 
-        dlg = MissingOutdirDialog(self.ripper.outdir)
+        dlg = dialogs.MissingOutdirDialog(self.ripper.outdir)
         if not dlg.exec_():
             self.quit(force=True)
             return
 
-        path = QFileDialog.getExistingDirectory(
-            QDialog(),
+        path = QtWidgets.QFileDialog.getExistingDirectory(
+            QtWidgets.QDialog(),
             f'{self._name}: Select Output Folder',
         )
         if path != '':
             self.ripper.outdir = path
-            save_settings(
+            utils.save_settings(
                 self.ripper.get_settings(),
             )
             return
@@ -158,7 +148,7 @@ def cli():
     STREAM.setLevel(args.loglevel)
     LOG.addHandler(STREAM)
 
-    app = QApplication(sys.argv)
+    app = QtWidgets.QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)
     _ = SystemTray(app)
     app.exec_()

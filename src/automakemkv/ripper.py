@@ -230,7 +230,7 @@ class Ripper(QtCore.QThread):
         sizes: dict,
         outdir: str,
         everything: bool,
-        extras: bool,        
+        extras: bool,
         filegen: Callable,
         progress,
     ):
@@ -260,26 +260,26 @@ class Ripper(QtCore.QThread):
             self.log.info("%s - Just saving metadata, not ripping", self.dev)
             return
 
-        filegen = self.filegen(
-            self.outdir,
-            self.info,
-            everything=self.everything,
-            extras=self.extras,
+        paths = dict(
+            self.filegen(
+                self.outdir,
+                self.info,
+                everything=self.everything,
+                extras=self.extras,
+            )
         )
 
-        info = {
-            title: {
-                'path': fpath,
-                'size': self.sizes[title],
-            }
-            for title, fpath in filegen
-        }
+        # Get list of all titles in the info dict
+        title_nums = list(self.info['titles'].keys())
+        for title in title_nums:
+            if title not in paths:
+                _ = self.info['titles'].pop(title)
 
         self.log.info('Emitting add disc signal')
-        self.progress.ADD_DISC.emit(self.dev, info)
+        self.progress.ADD_DISC.emit(self.dev, self.info)
 
-        for title, info in info.items():
-            self.rip_title(title, info['path'])
+        for title, path in paths.items():
+            self.rip_title(title, path)
             if self._dead:
                 return
 
@@ -328,8 +328,13 @@ class Ripper(QtCore.QThread):
         #     and self.mkv_thread.isRunning()
         # ):
 
-        while self.mkv_thread.isRunning():
-            self.progress.TRACK_SIZE.emit(self.dev, directory_size(tmpdir))
+        # while self.mkv_thread.isRunning():
+        while not self.mkv_thread.wait(SIZE_POLL*1000):
+            cursize = directory_size(tmpdir)
+            self.progress.TRACK_SIZE.emit(
+                self.dev,
+                round(cursize/self.sizes[title]*100),
+            )
 
         # if RUNNING.is_set():
         #     self.mkv_thread.quit()

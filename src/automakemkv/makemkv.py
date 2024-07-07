@@ -143,7 +143,7 @@ class MakeMKVInfo(MakeMKVThread):
         self.discid = discid
         self.info_path = os.path.join(
             dbdir or DBDIR,
-            f"{dev}.info.gz",
+            f"{discid}.info.gz",
         )
 
         self.discInfo = {}

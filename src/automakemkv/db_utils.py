@@ -1,3 +1,4 @@
+import logging
 import os
 import re
 import gzip
@@ -56,6 +57,7 @@ def add_media_type(db_root):
 
     """
 
+    log = logging.getLogger(__name__)
     for file in os.listdir(db_root):
         if not file.endswith('.json'):
             continue
@@ -65,23 +67,23 @@ def add_media_type(db_root):
             os.path.splitext(file)[0]+'.info.gz'
         )
         if not os.path.isfile(info_file):
-            print(f'Could NOT find {info_file}, skipping')
+            log.warning('Could NOT find %s, skipping', info_file)
             continue
 
         with open(file, 'r') as iid:
             json_data = json.load(iid)
 
         if 'media_type' in json_data:
-            print(f'Media_type already exists : {file}')
+            log.info('Media_type already exists: %s', file)
             continue
 
         try:
             media_type = get_media_type(info_file)
         except Exception as error:
-            print(error)
+            log.error(error)
             continue
 
-        print(f'Updating data in : {file}')
+        log.info('Updating data in: %s', file)
         json_data['media_type'] = media_type
         with open(file, 'w') as oid:
             json.dump(json_data, oid, indent=4)

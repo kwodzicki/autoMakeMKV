@@ -225,7 +225,6 @@ class DiscMetadata(BaseMetadata):
         info = super().getInfo()
         info['media_type'] = self.media_type.currentText()
         info['upc'] = self.upc.text()
-        print(info)
         return info
 
     def setInfo(self, info):

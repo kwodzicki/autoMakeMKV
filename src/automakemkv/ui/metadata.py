@@ -3,6 +3,7 @@ import logging
 from PyQt5 import QtWidgets
 from PyQt5 import QtCore
 
+from .. import NAME
 from .. import makemkv
 from . import utils
 from . import base_widgets
@@ -381,6 +382,8 @@ class ExistingDiscOptions(dialogs.MyQDialog):
         layout.addWidget(self.button_box)
 
         self.setLayout(layout)
+        vendor, model = utils.get_vendor_model(self.dev)
+        self.setWindowTitle(f"{NAME} - {vendor} {model}")
 
         self._timer = QtCore.QTimer()
         self._timer.timeout.connect(self._message_timeout)

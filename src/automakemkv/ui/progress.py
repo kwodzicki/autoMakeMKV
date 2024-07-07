@@ -53,6 +53,7 @@ class ProgressDialog(QtWidgets.QWidget):
         self.layout.addWidget(widget)
         self.widgets[dev] = widget
         self.show()
+        self.adjustSize()
 
     @QtCore.pyqtSlot(str)
     def remove_disc(self, dev: str):
@@ -63,6 +64,7 @@ class ProgressDialog(QtWidgets.QWidget):
             widget.deleteLater()
         if len(self.widgets) == 0:
             self.setVisible(False)
+        self.adjustSize()
 
     @QtCore.pyqtSlot(str, str)
     def current_track(self, dev: str, title: str):
@@ -111,15 +113,15 @@ class ProgressWidget(QtWidgets.QFrame):
         self.current_title = None
         self.dev = dev
         self.info = info
-        tot_size = scale_mb(
-            sum(t.get('size', 0) for t in info.values())
-        )
+        tot_size = 100 * len(info['titles'])
 
         vendor, model = utils.get_vendor_model(dev)
-        self.title = QtWidgets.QLabel(f"{vendor} {model} : {dev}")
-        self.track_label = QtWidgets.QLabel('')
-        self.track_count = QtWidgets.QLabel('')
+        self.drive = QtWidgets.QLabel(f"{vendor} {model} : {dev}")
+
+        self.metadata = Metadata()
+
         self.track_prog = QtWidgets.QProgressBar()
+        self.track_prog.setRange(0, 100)
 
         self.disc_label = QtWidgets.QLabel('Overall Progress')
         self.disc_prog = QtWidgets.QProgressBar()
@@ -129,14 +131,13 @@ class ProgressWidget(QtWidgets.QFrame):
         self.cancel_but = QtWidgets.QPushButton("Cancel Rip")
         self.cancel_but.clicked.connect(self.cancel)
 
-        layout = QtWidgets.QGridLayout()
-        layout.addWidget(self.title, 0, 0, 1, 3)
-        layout.addWidget(self.track_label, 10, 0)
-        layout.addWidget(self.track_count, 10, 2)
-        layout.addWidget(self.track_prog, 11, 0, 1, 3)
-        layout.addWidget(self.disc_label, 20, 0, 1, 3)
-        layout.addWidget(self.disc_prog, 21, 0, 1, 3)
-        layout.addWidget(self.cancel_but, 30, 0, 1, 3)
+        layout = QtWidgets.QVBoxLayout()
+        layout.addWidget(self.drive)
+        layout.addWidget(self.metadata)
+        layout.addWidget(self.track_prog)
+        layout.addWidget(self.disc_label)
+        layout.addWidget(self.disc_prog)
+        layout.addWidget(self.cancel_but)
 
         self.setLayout(layout)
 
@@ -170,36 +171,18 @@ class ProgressWidget(QtWidgets.QFrame):
         # processed track and must update the total size of that track
         # to be maximum size of the track
         if self.current_title is not None:
-            self.title_sizes[-1] = (
-                self
-                .info
-                .get(self.current_title, {})
-                .get('size', 0)
-            )
+            self.title_sizes[-1] = 100
+            self.track_size(100)
+
+        info = self.info['titles'][title]
+        self.metadata.update(info)
 
         # Increment number of titles processed and append file size
         self.n_titles += 1
         self.title_sizes.append(0)
 
-        path = (
-            self
-            .info.get(title, {})
-            .get('path', '')
-        )
-        self.track_label.setText(
-            f"Outfile: {path}",
-        )
-        self.track_count.setText(
-            f"Title: {self.n_titles}/{len(self)}",
-        )
-
-        # Update progress stats for new track
-        self.track_prog.setRange(
-            0,
-            scale_mb(self.info.get(title, {}).get('size', 0)),
-        )
-        self.track_prog.setValue(0)
         self.current_title = title
+        self.track_size(0)
 
     def track_size(self, tsize):
         """
@@ -213,24 +196,76 @@ class ProgressWidget(QtWidgets.QFrame):
             return
 
         self.title_sizes[-1] = tsize
-        self.track_prog.setValue(
-            scale_mb(tsize)
-        )
+        self.track_prog.setValue(tsize)
         self.disc_prog.setValue(
-            scale_mb(sum(self.title_sizes))
+            sum(self.title_sizes)
         )
 
 
-def scale_mb(val: int) -> int:
-    """
-    Convert bytes value to megabytes
+class Metadata(QtWidgets.QWidget):
 
-    Arguments:
-        val (int): Size in bytes
+    def __init__(self):
+        super().__init__()
 
-    Returns:
-        int: size in megabytes rounded up
+        self.title = BaseLabel('Title')
+        self.year = BaseLabel('Year')
+        self.series = BaseLabel('Series')
+        self.season = BaseLabel('Season')
+        self.episode = BaseLabel('Episode')
 
-    """
+        self._layout = QtWidgets.QGridLayout()
+        self.setLayout(self._layout)
 
-    return val // MEGABYTE + 1
+    def update(self, info):
+
+        self.clear()
+        if info['isMovie']:
+            self.is_movie(info)
+        elif info['isSeries']:
+            self.is_series(info)
+
+    def is_movie(self, info):
+
+        self.title.setText(info['title'])
+        self.year.setText(info['year'])
+
+        self.title.addToLayout(self._layout, 0)
+        self.year.addToLayout(self._layout, 1)
+
+    def is_series(self, info):
+
+        self.series.setText(info['title'])
+        self.year.setText(info['year'])
+        self.title.setText(info['episodeTitle'])
+        self.season.setText(info['season'])
+        self.episode.setText(info['episode'])
+
+        self.series.addToLayout(self._layout, 0)
+        self.year.addToLayout(self._layout, 1)
+        self.title.addToLayout(self._layout, 2)
+        self.season.addToLayout(self._layout, 3)
+        self.episode.addToLayout(self._layout, 4)
+
+    def clear(self):
+
+        for i in reversed(range(self._layout.count())):
+            widget = self._layout.itemAt(i).widget()
+            self._layout.removeWidget(widget)
+            widget.setParent(None)
+
+
+class BaseLabel(QtWidgets.QWidget):
+
+    def __init__(self, label):
+        super().__init__()
+
+        self.label = QtWidgets.QLabel(f"{label}:")
+        self.value = QtWidgets.QLabel('')
+
+    def addToLayout(self, layout: QtWidgets.QGridLayout, row: int):
+
+        layout.addWidget(self.label, row, 0)
+        layout.addWidget(self.value, row, 1)
+
+    def setText(self, text):
+        self.value.setText(text)

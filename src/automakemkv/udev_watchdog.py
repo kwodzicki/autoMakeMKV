@@ -32,28 +32,13 @@ class UdevWatchdog(QtCore.QThread):
     """
     Main watchdog for disc monitoring/ripping
 
-    This function will run a pyudev monitor instance,
-    looking for changes in disc. On change, will
-    spawn the DiscDialog widget loading
-    information from the database if exists, or
-    prompting using for information via a GUI.
+    This thread will run a pyudev monitor instance, looking for changes in
+    disc. On change, will spawn the DiscHandler object for handling loading
+    of disc information from the database if exists, or prompting using for
+    information via a GUI.
 
-    After information is obtained, a rip of the
-    requested/flagged tracks will start.
-
-    The logic for disc mounting is a bit obtuse, so will try to explain.
-    When the disc is initially inserted, it should trigger an event where
-    the CHANGE property is set. As the dev should NOT be in mounted list,
-    we add it to the mounting list. The next event for that dev is the event
-    that the disc is fully mounted. This will NOT have the CHANGE property.
-    As the disc is still in the mounting list at this point, will NOT enter
-    the if-statement there and will remove dev from mounting list, add dev
-    to mounted list, and then run the ripping process.
-
-    On future calls without the CHANGE property, the dev will NOT be in
-    the mounting list, so we will just skip them. For an event WITH the
-    CHANGE property, since the dev IS in the mounted list, we remove it
-    from the mounted list and log information that it has been ejected.
+    After information is obtained, a rip of the requested/flagged tracks
+    will start.
 
     """
 
@@ -178,7 +163,7 @@ class UdevWatchdog(QtCore.QThread):
 
             if device.properties.get(CHANGE, '') != '1':
                 self.log.debug(
-                    "%s - Not a '%s' event, ignoring: %s",
+                    "%s - Not a '%s' event, ignoring",
                     dev,
                     CHANGE,
                 )

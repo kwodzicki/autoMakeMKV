@@ -142,7 +142,7 @@ class DiscHandler(QtCore.QObject):
         # Update mounted information and run rip_disc
         self.info = info
         self.sizes = sizes
-        self.options = metadata.ExistingDiscOptions(dev)
+        self.options = metadata.ExistingDiscOptions(dev, info)
         self.options.FINISHED.connect(self.handle_metadata)
 
     @QtCore.pyqtSlot(str, bool)

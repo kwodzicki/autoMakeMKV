@@ -348,7 +348,7 @@ class ExistingDiscOptions(dialogs.MyQDialog):
 
     """
 
-    def __init__(self, dev, parent=None, timeout=30):
+    def __init__(self, dev: str, info: dict, timeout: int = 30, parent=None):
         super().__init__(parent)
 
         self.dev = dev
@@ -374,11 +374,23 @@ class ExistingDiscOptions(dialogs.MyQDialog):
             self.timeout_fmt.format(self._timeout)
         )
 
+        # Set up model for table containing releases
+        self.model = MyTableModel(info)
+
+        # Build the table
+        self.table = QtWidgets.QTableView()
+        self.table.setModel(self.model)
+        # Hide row names
+        self.table.verticalHeader().setVisible(False)
+        # Disable selection
+        self.table.setSelectionMode(QtWidgets.QTableView.NoSelection)
+
         layout = QtWidgets.QVBoxLayout()
         layout.addWidget(
             QtWidgets.QLabel(message)
         )
         layout.addWidget(self.timeout_label)
+        layout.addWidget(self.table)
         layout.addWidget(self.button_box)
 
         self.setLayout(layout)
@@ -409,6 +421,104 @@ class ExistingDiscOptions(dialogs.MyQDialog):
             self.done(OPEN)
             return
         self.done(IGNORE)
+
+
+class MyTableModel(QtCore.QAbstractTableModel):
+    """
+    Table model for release information
+
+    """
+
+    def __init__(self, info: dict, parent=None):
+        super().__init__(parent)
+
+        self.log = logging.getLogger(__name__)
+
+        self.info = info
+        # Column names
+        self.series_columns = [
+            'Series',
+            'Year',
+            'Season',
+            'Episode',
+            'Title',
+            'Extra Type',
+        ]
+
+        self.movie_columns = [
+            'Movie',
+            'Year',
+            'Extra Type',
+            'Extra Title',
+        ]
+
+        self.columns = None
+        self._build_data()
+
+    def _build_data(self):
+        # Iterate to create table rows and flattend information for releases.
+        # The flattened release informaiton is created by expanding each
+        # medium object in the list of mediums for a release into its own
+        # "release" object.
+
+        if self.info.get('isSeries', False):
+            func = self._series_info
+            self.columns = self.series_columns
+        elif self.info.get('isMovie', False):
+            func = self._movie_info
+            self.columns = self.movie_columns
+        else:
+            self.log.error("Could not determine if movie or series!")
+            return
+
+        data = []
+        for title in self.info.get('titles', {}).values():
+            data.append(func(title))
+
+        self.data = data
+
+    def _series_info(self, title):
+
+        return (
+            self.info.get('title', ''),
+            self.info.get('year', ''),
+            title.get('season', ''),
+            title.get('episode', ''),
+            title.get('episodeTitle', ''),
+            title.get('extra', ''),
+        )
+
+    def _movie_info(self, title):
+
+        return (
+            self.info.get('title', ''),
+            self.info.get('year', ''),
+            title.get('extra', ''),
+            title.get('extraTitle'),
+        )
+
+    def headerData(
+        self,
+        section: int,
+        orientation: QtCore.Qt.Orientation,
+        role: int,
+    ):
+        if role == QtCore.Qt.DisplayRole:
+            if orientation == QtCore.Qt.Horizontal:
+                return self.columns[section]
+            return ""
+
+    def columnCount(self, parent=None):
+        return len(self.data[0])
+
+    def rowCount(self, parent=None):
+        return len(self.data)
+
+    def data(self, index: QtCore.QModelIndex, role: int):
+        if role == QtCore.Qt.DisplayRole:
+            row = index.row()
+            col = index.column()
+            return str(self.data[row][col])
 
 
 def check_info(parent, info: dict):

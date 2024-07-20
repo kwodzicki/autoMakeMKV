@@ -386,6 +386,7 @@ class Ripper(QtCore.QThread):
         self.rip_disc()
         self.progress.REMOVE_DISC.emit(self.dev)
         subprocess.call(['eject', self.dev])
+        self.log.info("%s - Ripper thread finished", self.dev)
 
     @QtCore.pyqtSlot(str)
     def terminate(self, dev):

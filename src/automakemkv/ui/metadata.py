@@ -8,6 +8,7 @@ from .. import makemkv
 from . import utils
 from . import base_widgets
 from . import dialogs
+from . import progress
 
 SIZEKEY = 'Disk Size (Bytes)'
 
@@ -49,6 +50,9 @@ class DiscMetadataEditor(dialogs.MyQDialog):
         self.titleTree.setHeaderLabels(['Type', 'Description'])
         self.titleTree.setColumnWidth(0, 100)
 
+        # Initialize basic progress widget
+        self.progress = progress.BasicProgressWidget()
+
         self.infoBox = QtWidgets.QTextEdit()
         self.msgs = QtWidgets.QTextEdit()
         self.save_but = QtWidgets.QPushButton('Save && Eject')
@@ -75,8 +79,9 @@ class DiscMetadataEditor(dialogs.MyQDialog):
         layout.addWidget(self.infoBox, 1, 1, 1, 1)
         layout.addWidget(self.titleMetadata, 2, 1, 1, 1)
         layout.addWidget(self.msgs, 3, 0, 1, 2)
-        layout.addWidget(self.save_but, 4, 0, 1, 2)
-        layout.addWidget(self.rip_but, 5, 0, 1, 2)
+        layout.addWidget(self.progress, 4, 0, 1, 2)
+        layout.addWidget(self.save_but, 5, 0, 1, 2)
+        layout.addWidget(self.rip_but, 6, 0, 1, 2)
 
         layout.setMenuBar(
             self._initMenu()
@@ -89,8 +94,9 @@ class DiscMetadataEditor(dialogs.MyQDialog):
             dev,
             discid,
             dbdir=self.dbdir,
+            noscan=True,
         )
-        self.loadDisc.signal.connect(self.msgs.append)
+        self.loadDisc.SIGNAL.connect(self.msgs.append)
         self.loadDisc.finished.connect(self.buildTitleTree)
 
         if load_existing:
@@ -101,6 +107,9 @@ class DiscMetadataEditor(dialogs.MyQDialog):
             )
         else:
             self.loadDisc.start()
+            self.loadDisc.started.wait()
+            # Update pipe to read from in the progress widget
+            self.progress.new_pipe(self.loadDisc.proc.stderr)
 
         self.show()
 
@@ -276,6 +285,10 @@ class DiscMetadataEditor(dialogs.MyQDialog):
         self.titleMetadata.setInfo(obj.info)
 
     def buildTitleTree(self, info=None, sizes=None):
+
+        # Remove the progress widget from the window
+        self.layout().removeWidget(self.progress)
+        self.progress.deleteLater()
 
         self.titleTree.clear()
         discInfo = self.loadDisc.discInfo

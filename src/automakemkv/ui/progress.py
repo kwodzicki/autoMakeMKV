@@ -1,4 +1,7 @@
 import logging
+import time
+
+from subprocess import PIPE
 
 from PyQt5 import QtWidgets
 from PyQt5 import QtCore
@@ -88,6 +91,67 @@ class ProgressDialog(QtWidgets.QWidget):
         self.REMOVE_DISC.emit(dev)
 
 
+class BasicProgressWidget(QtWidgets.QWidget):
+    """
+    Progress for a single disc
+
+    Notes:
+        All sizes are converted from bytes (assumed input units) to megabytes
+        to stay unders 32-bit integer range.
+
+    """
+
+    CANCEL = QtCore.pyqtSignal(str)  # dev to cancel rip of
+
+    def __init__(self, pipe=None):
+        super().__init__()
+
+        self.track_label = QtWidgets.QLabel('')
+        self.track_prog = QtWidgets.QProgressBar()
+
+        self.disc_label = QtWidgets.QLabel('')
+        self.disc_prog = QtWidgets.QProgressBar()
+
+        layout = QtWidgets.QVBoxLayout()
+        layout.addWidget(self.track_label)
+        layout.addWidget(self.track_prog)
+        layout.addWidget(self.disc_label)
+        layout.addWidget(self.disc_prog)
+
+        self.setLayout(layout)
+
+        self.thread = ProgressParser(pipe)
+        self.thread.PROGRESS_TITLE.connect(self.label_update)
+        self.thread.PROGRESS_VALUE.connect(self.progress_update)
+
+        self.thread.start()
+
+    def new_pipe(self, pipe: PIPE):
+
+        self.thread.pipe = pipe
+
+    @QtCore.pyqtSlot(str, str)
+    def label_update(self, mtype: str, text: str):
+
+        if mtype == 'PRGC':
+            self.track_label.setText(text)
+        elif mtype == 'PRGT':
+            self.disc_label.setText(text)
+
+    @QtCore.pyqtSlot(int, int, int)
+    def progress_update(self, current: int, total: int, maximum: int):
+
+        if maximum == -1:
+            self.track_prog.setValue(self.track_prog.maximum())
+            self.disc_prog.setValue(self.disc_prog.maximum())
+            return
+
+        self.track_prog.setMaximum(maximum)
+        self.track_prog.setValue(current)
+        self.disc_prog.setMaximum(maximum)
+        self.disc_prog.setValue(total)
+
+
 class ProgressWidget(QtWidgets.QFrame):
     """
     Progress for a single disc
@@ -100,7 +164,7 @@ class ProgressWidget(QtWidgets.QFrame):
 
     CANCEL = QtCore.pyqtSignal(str)  # dev to cancel rip of
 
-    def __init__(self, dev, info):
+    def __init__(self, dev: str, info: dict, pipe=None):
         super().__init__()
 
         self.setFrameStyle(
@@ -113,7 +177,7 @@ class ProgressWidget(QtWidgets.QFrame):
         self.current_title = None
         self.dev = dev
         self.info = info
-        tot_size = 100 * len(info['titles'])
+        tot_size = 100 * len(info.get('titles', []))
 
         vendor, model = utils.get_vendor_model(dev)
         self.drive = QtWidgets.QLabel(
@@ -122,13 +186,11 @@ class ProgressWidget(QtWidgets.QFrame):
 
         self.metadata = Metadata()
 
+        self.track_label = QtWidgets.QLabel('')
         self.track_prog = QtWidgets.QProgressBar()
-        self.track_prog.setRange(0, 100)
 
-        self.disc_label = QtWidgets.QLabel('Overall Progress')
+        self.disc_label = QtWidgets.QLabel('')
         self.disc_prog = QtWidgets.QProgressBar()
-        self.disc_prog.setRange(0, tot_size)
-        self.disc_prog.setValue(0)
 
         self.cancel_but = QtWidgets.QPushButton("Cancel Rip")
         self.cancel_but.clicked.connect(self.cancel)
@@ -136,12 +198,19 @@ class ProgressWidget(QtWidgets.QFrame):
         layout = QtWidgets.QVBoxLayout()
         layout.addWidget(self.drive)
         layout.addWidget(self.metadata)
+        layout.addWidget(self.track_label)
         layout.addWidget(self.track_prog)
         layout.addWidget(self.disc_label)
         layout.addWidget(self.disc_prog)
         layout.addWidget(self.cancel_but)
 
         self.setLayout(layout)
+
+        self.thread = ProgressParser(pipe)
+        self.thread.PROGRESS_TITLE.connect(self.label_update)
+        self.thread.PROGRESS_VALUE.connect(self.progress_update)
+
+        self.thread.start()
 
     def __len__(self):
         return len(self.info)
@@ -157,6 +226,31 @@ class ProgressWidget(QtWidgets.QFrame):
         )
         if res == message.Yes:
             self.CANCEL.emit(self.dev)
+
+    def new_pipe(self, pipe: PIPE):
+
+        self.thread.pipe = pipe
+
+    @QtCore.pyqtSlot(str, str)
+    def label_update(self, mtype: str, text: str):
+
+        if mtype == 'PRGC':
+            self.track_label.setText(text)
+        elif mtype == 'PRGT':
+            self.disc_label.setText(text)
+
+    @QtCore.pyqtSlot(int, int, int)
+    def progress_update(self, current: int, total: int, maximum: int):
+
+        if maximum == -1:
+            self.track_prog.setValue(self.track_prog.maximum())
+            self.disc_prog.setValue(self.disc_prog.maximum())
+            return
+
+        self.track_prog.setMaximum(maximum)
+        self.track_prog.setValue(current)
+        self.disc_prog.setMaximum(maximum)
+        self.disc_prog.setValue(total)
 
     def current_track(self, title: str):
         """
@@ -254,6 +348,54 @@ class Metadata(QtWidgets.QWidget):
             widget = self._layout.itemAt(i).widget()
             self._layout.removeWidget(widget)
             widget.setParent(None)
+
+
+class ProgressParser(QtCore.QThread):
+    """
+    Parse MakeMKV progress messages in thread
+
+    """
+
+    PROGRESS_TITLE = QtCore.pyqtSignal(str, str)
+    PROGRESS_VALUE = QtCore.pyqtSignal(int, int, int)
+
+    def __init__(self, pipe=None):
+        super().__init__()
+        self.log = logging.getLogger(__name__)
+        self.pipe = pipe
+
+    def _check_pipe(self):
+
+        if self.pipe is None:
+            return True
+
+        return not self.pipe.closed
+
+    def run(self):
+
+        while self.pipe is None or not self.pipe.closed:
+            if self.pipe is None:
+                time.sleep(0.5)
+                continue
+            try:
+                line = self.pipe.readline()
+            except Exception:
+                continue
+
+            mtype, *vals = line.split(':')
+            vals = ":".join(vals).split(',')
+
+            if mtype == 'PRGV':
+                self.PROGRESS_VALUE.emit(*map(int, vals))
+                continue
+
+            self.PROGRESS_TITLE.emit(
+                mtype,
+                vals[-1].rstrip().strip('"'),
+            )
+
+        self.PROGRESS_VALUE.emit(-1, -1, -1)
+        self.log.debug("Progress processor thread dead")
 
 
 class BaseLabel(QtWidgets.QWidget):

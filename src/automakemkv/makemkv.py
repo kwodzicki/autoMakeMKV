@@ -8,13 +8,21 @@ import os
 import re
 import gzip
 
-from subprocess import Popen, PIPE, STDOUT
+from threading import Event
+from subprocess import (
+    check_output,
+    Popen,
+    PIPE,
+    TimeoutExpired,
+    CalledProcessError,
+)
 
 from PyQt5 import QtCore
 
 from . import DBDIR
 from .mkv_lookup import AP
 
+DEVICE_MSG = 'DRV:'
 SPLIT = re.compile(r'(".*?"|[^,]+)')
 
 
@@ -29,6 +37,7 @@ class MakeMKVThread(QtCore.QThread):
     def __init__(self, command, *args, **opts):
         super().__init__()
         self.log = logging.getLogger(__name__)
+        self.started = Event()
         self.command = command
         self.args = args
         self.opts = opts
@@ -61,7 +70,7 @@ class MakeMKVThread(QtCore.QThread):
             else:
                 if isinstance(val, bool):
                     val = str(val).lower()
-                cmd.extend([kkey, str(val)])
+                cmd.append(f"{kkey}={val}")
         cmd.extend(self.args)
 
         self.log.debug("Running command : %s", ' '.join(cmd))
@@ -69,8 +78,9 @@ class MakeMKVThread(QtCore.QThread):
             cmd,
             universal_newlines=True,
             stdout=PIPE,
-            stderr=STDOUT,
+            stderr=PIPE,
         )
+        self.started.set()
 
     def run(self):
         """Method to run in thread"""
@@ -122,7 +132,7 @@ class MakeMKVInfo(MakeMKVThread):
 
     """
 
-    signal = QtCore.pyqtSignal(str)
+    SIGNAL = QtCore.pyqtSignal(str)
 
     def __init__(
         self,
@@ -136,6 +146,8 @@ class MakeMKVInfo(MakeMKVThread):
             f"dev:{dev}",
             minlength=0,
             robot=True,
+            messages='-stdout',
+            progress='-stderr',
             **kwargs,
         )
 
@@ -177,6 +189,7 @@ class MakeMKVInfo(MakeMKVThread):
                 fid.write(line)
                 self.parse_line(line)
         self.proc.wait()
+        self.proc.communicate()
 
     def loadFile(self, json: str | None = None) -> None:
         """
@@ -202,7 +215,7 @@ class MakeMKVInfo(MakeMKVThread):
 
         if infoType == 'MSG':
             _, _, _, val, *_ = SPLIT.findall(data)
-            self.signal.emit(val.strip('"'))
+            self.SIGNAL.emit(val.strip('"'))
         elif infoType == 'CINFO':
             cid, _, val = SPLIT.findall(data)
             if cid in AP:
@@ -220,3 +233,37 @@ class MakeMKVInfo(MakeMKVThread):
                 tt[stream] = {}
             if sid in AP:
                 tt[stream][AP[sid]] = val.strip('"')
+
+
+def makemkv_dev_to_disc(timeout: float | int = 15) -> dict:
+    """
+    Get dict of dev devices to MakeMKV disc ids
+
+    """
+
+    log = logging.getLogger(__name__)
+
+    output = {}
+    try:
+        info = check_output(
+            ['makemkvcon', '-r', 'info', 'disc'],
+            timeout=timeout,
+        )
+    except TimeoutExpired as err:
+        info = err.output
+    except CalledProcessError as err:
+        info = err.output
+    except Exception as err:
+        log.error("Failed to get disc ids from MakeMKV: %s", err)
+        return output
+
+    for line in info.decode().splitlines():
+        if not line.startswith(DEVICE_MSG):
+            continue
+        info = line.strip(DEVICE_MSG).split(',')
+        dev = info[-1].strip('"')
+        if dev == '':
+            continue
+        output[dev] = info[0]
+    print(output)
+    return output

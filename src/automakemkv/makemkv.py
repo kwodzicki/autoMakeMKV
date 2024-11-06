@@ -24,6 +24,17 @@ from .mkv_lookup import AP
 
 DEVICE_MSG = 'DRV:'
 SPLIT = re.compile(r'(".*?"|[^,]+)')
+DEFAULT_KWARGS = {
+    'robot': True,
+    'noscan': True,
+    'minlength': 0,
+    'messages': '-stdout',
+    'progress': '-stderr',
+}
+
+SWITCHES = ('noscan', 'robot', 'decrypt')
+SOURCES = ('iso', 'file', 'disc', 'dev')
+COMMANDS = ('info', 'mkv', 'backup', 'f', 'reg')
 
 
 class MakeMKVThread(QtCore.QThread):
@@ -34,14 +45,96 @@ class MakeMKVThread(QtCore.QThread):
 
     """
 
-    def __init__(self, command, *args, **opts):
+    def __init__(
+        self,
+        command: str,
+        title: str | None = None,
+        output: str | None = None,
+        **opts,
+    ):
+        """
+        iso: str | None = None,
+        file: str | None = None,
+        disc: str | None = None,
+        dev: str | None = None,
+        messages: str | None = None,
+        progress: str | None = None,
+        debug: str | bool | None = None,
+        cache: int | None = None,
+        minlength: int | None = None
+        noscan: bool = False,
+        robot: bool = False,
+        decrypt: bool = False,
+        directio: bool | None = None,
+
+        """
+
         super().__init__()
         self.log = logging.getLogger(__name__)
         self.started = Event()
         self.command = command
-        self.args = args
+        self.source = self._parse_source(opts)
+        self.title = title
+        self.output = output
         self.opts = opts
         self.proc = None
+
+    def _parse_source(self, opts):
+        """
+        Parse source and check is valid for command
+
+        For the 'backup' command, the source must be 'disc'. So, we check
+        here that were are using the disc id. If not, we can get the disc id
+        from a dev device. Otherwise, have to throw and error
+
+        """
+
+        source = None
+        for key in SOURCES:
+            if key not in opts:
+                continue
+
+            if source is not None:
+                self.log.warning(
+                    "Multiple sources defined; assuming '%s:%s'",
+                    *source,
+                )
+                _ = opts.pop(key)
+                continue
+
+            source = [key, opts.pop(key)]
+
+        if source is None:
+            self.log.error("No source defined!")
+            self.command = None
+            return source
+
+        # If command is NOT backup or the type IS disc, then return source
+        if self.command != 'backup' or source[0] == 'disc':
+            return source
+
+        # If made here and is NOT dev, then don't know what to do!
+        if source[0] != 'dev':
+            self.log.critical(
+                "%s -  Cannot backup from '%s' device",
+                source[1],
+                source[0],
+            )
+            self.command = None
+            return None
+
+        # If here, try to look up disc number from dev
+        lookup = _dev_to_disc()
+        dev = source[1]
+        if dev not in lookup:
+            self.log.critical(
+                "%s - Failed to find dev in disc list from makemkvcon",
+                dev,
+            )
+            self.command = None
+            return None
+
+        return ['disc', lookup[dev]]
 
     @property
     def returncode(self):
@@ -57,23 +150,48 @@ class MakeMKVThread(QtCore.QThread):
 
         """
 
-        if self.command not in ('info', 'mkv', 'backup', 'f', 'reg'):
-            self.log.error("Unsupported command : '%s'", self.command)
+        if self.command is None:
             return
 
-        cmd = ['makemkvcon', self.command]
+        if self.source is None:
+            self.log.error("No source defined!")
+            return
+
+        opts = []
         for key, val in self.opts.items():
-            kkey = f"--{key}"
-            if key in ('noscan', 'decrypt', 'robot'):
+            if key in SWITCHES:
                 if val is True:
-                    cmd.append(kkey)
+                    opts.append(f"--{key}")
             else:
                 if isinstance(val, bool):
                     val = str(val).lower()
-                cmd.append(f"{kkey}={val}")
-        cmd.extend(self.args)
+                opts.append(f"--{key}={val}")
 
-        self.log.debug("Running command : %s", ' '.join(cmd))
+        if self.command not in COMMANDS:
+            self.log.error(
+                "%s - Unsupported command : '%s'",
+                self.source[1],
+                self.command,
+            )
+            return
+
+        cmd = [
+            'makemkvcon',
+            *opts,
+            self.command,
+            "{}:{}".format(*self.source),
+        ]
+        if self.title is not None:
+            cmd.append(self.title)
+        if self.output is not None:
+            cmd.append(self.output)
+
+        self.log.debug(
+            "%s - Running command : %s",
+            self.source[1],
+            ' '.join(cmd),
+        )
+
         self.proc = Popen(
             cmd,
             universal_newlines=True,
@@ -87,25 +205,24 @@ class MakeMKVThread(QtCore.QThread):
 
         pass
 
-    def quit(self):
+    def terminate(self):
         """Kill the MakeMKV Process"""
 
         if self.proc:
             self.log.info('Killing process')
             self.proc.kill()
-        super().quit()
+        super().wait()
 
 
 class MakeMKVRip(MakeMKVThread):
 
-    def __init__(self, source: str, title: str, dest_folder: str, **kwargs):
-        super().__init__(
-            'mkv',  # Command set to mkv
-            f"dev:{source}",  # Source: is dev
-            title,
-            dest_folder,
+    def __init__(self, command: str, **kwargs):
+        kwargs = {
+            **DEFAULT_KWARGS,
             **kwargs,
-        )
+        }
+
+        super().__init__(command, **kwargs)
 
     def run(self):
 
@@ -114,11 +231,12 @@ class MakeMKVRip(MakeMKVThread):
             return
 
         for line in iter(self.proc.stdout.readline, ''):
-            self.log.info(
-                "[%s] %s",
-                " - ".join(self.args),
+            self.log.debug(
+                "%s - %s",
+                self.source[1],
                 line.rstrip(),
             )
+        self.proc.wait()
         self.proc.communicate()
         self.log.info("MakeMKVRip thread dead")
 
@@ -141,13 +259,14 @@ class MakeMKVInfo(MakeMKVThread):
         dbdir: str | None = None,
         **kwargs,
     ):
+        kwargs = {
+            **DEFAULT_KWARGS,
+            **kwargs,
+            'dev': dev,
+        }
+
         super().__init__(
             "info",
-            f"dev:{dev}",
-            minlength=0,
-            robot=True,
-            messages='-stdout',
-            progress='-stderr',
             **kwargs,
         )
 
@@ -235,7 +354,7 @@ class MakeMKVInfo(MakeMKVThread):
                 tt[stream][AP[sid]] = val.strip('"')
 
 
-def makemkv_dev_to_disc(timeout: float | int = 15) -> dict:
+def _dev_to_disc(timeout: float | int = 60.0) -> dict:
     """
     Get dict of dev devices to MakeMKV disc ids
 
@@ -265,5 +384,5 @@ def makemkv_dev_to_disc(timeout: float | int = 15) -> dict:
         if dev == '':
             continue
         output[dev] = info[0]
-    print(output)
+
     return output

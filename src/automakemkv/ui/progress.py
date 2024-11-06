@@ -1,7 +1,7 @@
 import logging
 import time
 
-from subprocess import PIPE
+from subprocess import Popen
 
 from PyQt5 import QtWidgets
 from PyQt5 import QtCore
@@ -14,13 +14,15 @@ MEGABYTE = 10**6
 class ProgressDialog(QtWidgets.QWidget):
 
     # First arg in dev, second is all info
-    ADD_DISC = QtCore.pyqtSignal(str, dict)
+    MKV_ADD_DISC = QtCore.pyqtSignal(str, dict, bool)
     # Arg is dev of disc to remove
-    REMOVE_DISC = QtCore.pyqtSignal(str)
+    MKV_REMOVE_DISC = QtCore.pyqtSignal(str)
+    # Args are dev of disc to attach process to and the process
+    MKV_NEW_PROCESS = QtCore.pyqtSignal(str, Popen)
     # First arg is dev, second is track num
-    CUR_TRACK = QtCore.pyqtSignal(str, str)
-    # First arg is dev, second is size of cur track
-    TRACK_SIZE = QtCore.pyqtSignal(str, int)
+    MKV_CUR_TRACK = QtCore.pyqtSignal(str, str)
+    # First arg is dev, second is track num
+    MKV_CUR_DISC = QtCore.pyqtSignal(str, str)
     # dev of the rip to cancel
     CANCEL = QtCore.pyqtSignal(str)
 
@@ -39,18 +41,18 @@ class ProgressDialog(QtWidgets.QWidget):
         self.layout = QtWidgets.QVBoxLayout()
         self.setLayout(self.layout)
 
-        self.ADD_DISC.connect(self.add_disc)
-        self.REMOVE_DISC.connect(self.remove_disc)
-        self.CUR_TRACK.connect(self.current_track)
-        self.TRACK_SIZE.connect(self.track_size)
+        self.MKV_ADD_DISC.connect(self.mkv_add_disc)
+        self.MKV_REMOVE_DISC.connect(self.mkv_remove_disc)
+        self.MKV_NEW_PROCESS.connect(self.mkv_new_process)
+        self.MKV_CUR_TRACK.connect(self.mkv_current_track)
 
     def __len__(self):
         return len(self.widgets)
 
-    @QtCore.pyqtSlot(str, dict)
-    def add_disc(self, dev: str, info: dict):
+    @QtCore.pyqtSlot(str, dict, bool)
+    def mkv_add_disc(self, dev: str, info: dict, full_disc: bool):
         self.log.debug("%s - Disc added", dev)
-        widget = ProgressWidget(dev, info)
+        widget = ProgressWidget(dev, info, full_disc)
         widget.CANCEL.connect(self.cancel)
 
         self.layout.addWidget(widget)
@@ -59,36 +61,43 @@ class ProgressDialog(QtWidgets.QWidget):
         self.adjustSize()
 
     @QtCore.pyqtSlot(str)
-    def remove_disc(self, dev: str):
-        self.log.debug("%s - Disc removed", dev)
+    def mkv_remove_disc(self, dev: str):
         widget = self.widgets.pop(dev, None)
         if widget is not None:
             self.layout.removeWidget(widget)
             widget.deleteLater()
+            self.log.debug("%s - Disc removed", dev)
+
         if len(self.widgets) == 0:
             self.setVisible(False)
         self.adjustSize()
 
-    @QtCore.pyqtSlot(str, str)
-    def current_track(self, dev: str, title: str):
-        self.log.debug("%s - Setting current track: %s", dev, title)
+    @QtCore.pyqtSlot(str, Popen)
+    def mkv_new_process(self, dev: str, proc: Popen):
         widget = self.widgets.get(dev, None)
         if widget is None:
             return
-        widget.current_track(title)
+        self.log.debug("%s - Setting new parser process", dev)
+        widget.NEW_PROCESS.emit(proc)
 
-    @QtCore.pyqtSlot(str, int)
-    def track_size(self, dev, tsize):
-        self.log.debug("%s - Update current track size: %d", dev, tsize)
+    @QtCore.pyqtSlot(str)
+    def mkv_current_disc(self, dev: str):
         widget = self.widgets.get(dev, None)
         if widget is None:
             return
-        widget.track_size(tsize)
+
+    @QtCore.pyqtSlot(str, str)
+    def mkv_current_track(self, dev: str, title: str):
+        widget = self.widgets.get(dev, None)
+        if widget is None:
+            return
+        self.log.debug("%s - Setting current track: %s", dev, title)
+        widget.current_track(title)
 
     @QtCore.pyqtSlot(str)
     def cancel(self, dev):
         self.CANCEL.emit(dev)
-        self.REMOVE_DISC.emit(dev)
+        self.MKV_REMOVE_DISC.emit(dev)
 
 
 class BasicProgressWidget(QtWidgets.QWidget):
@@ -102,9 +111,14 @@ class BasicProgressWidget(QtWidgets.QWidget):
     """
 
     CANCEL = QtCore.pyqtSignal(str)  # dev to cancel rip of
+    NEW_PROCESS = QtCore.pyqtSignal(Popen)
 
-    def __init__(self, pipe=None):
+    def __init__(self, dev: str, proc: Popen | None = None):
         super().__init__()
+
+        self.log = logging.getLogger(__name__)
+
+        self.dev = dev
 
         self.track_label = QtWidgets.QLabel('')
         self.track_prog = QtWidgets.QProgressBar()
@@ -120,15 +134,22 @@ class BasicProgressWidget(QtWidgets.QWidget):
 
         self.setLayout(layout)
 
-        self.thread = ProgressParser(pipe)
+        self.thread = ProgressParser(proc)
         self.thread.PROGRESS_TITLE.connect(self.label_update)
         self.thread.PROGRESS_VALUE.connect(self.progress_update)
 
         self.thread.start()
 
-    def new_pipe(self, pipe: PIPE):
+        self.NEW_PROCESS.connect(self.new_process)
 
-        self.thread.pipe = pipe
+    @QtCore.pyqtSlot(Popen)
+    def new_process(self, proc: Popen):
+
+        self.log.debug(
+            "%s - Updating process for parsing progress",
+            self.dev,
+        )
+        self.thread.proc = proc
 
     @QtCore.pyqtSlot(str, str)
     def label_update(self, mtype: str, text: str):
@@ -163,8 +184,15 @@ class ProgressWidget(QtWidgets.QFrame):
     """
 
     CANCEL = QtCore.pyqtSignal(str)  # dev to cancel rip of
+    NEW_PROCESS = QtCore.pyqtSignal(Popen)
 
-    def __init__(self, dev: str, info: dict, pipe=None):
+    def __init__(
+        self,
+        dev: str,
+        info: dict,
+        full_disc: bool,
+        proc: Popen | None = None,
+    ):
         super().__init__()
 
         self.setFrameStyle(
@@ -173,24 +201,24 @@ class ProgressWidget(QtWidgets.QFrame):
         self.setLineWidth(1)
 
         self.n_titles = 0
-        self.title_sizes = []
         self.current_title = None
         self.dev = dev
         self.info = info
-        tot_size = 100 * len(info.get('titles', []))
 
         vendor, model = utils.get_vendor_model(dev)
         self.drive = QtWidgets.QLabel(
             f"Device: {vendor} {model} [{dev}]",
         )
 
-        self.metadata = Metadata()
+        if full_disc:
+            self.metadata = QtWidgets.QLabel("Full Disc Backup")
+        else:
+            self.metadata = Metadata()
 
-        self.track_label = QtWidgets.QLabel('')
-        self.track_prog = QtWidgets.QProgressBar()
-
-        self.disc_label = QtWidgets.QLabel('')
-        self.disc_prog = QtWidgets.QProgressBar()
+        self.progress = BasicProgressWidget(dev, proc=proc)
+        self.NEW_PROCESS.connect(
+            self.progress.new_process
+        )
 
         self.cancel_but = QtWidgets.QPushButton("Cancel Rip")
         self.cancel_but.clicked.connect(self.cancel)
@@ -198,19 +226,10 @@ class ProgressWidget(QtWidgets.QFrame):
         layout = QtWidgets.QVBoxLayout()
         layout.addWidget(self.drive)
         layout.addWidget(self.metadata)
-        layout.addWidget(self.track_label)
-        layout.addWidget(self.track_prog)
-        layout.addWidget(self.disc_label)
-        layout.addWidget(self.disc_prog)
+        layout.addWidget(self.progress)
         layout.addWidget(self.cancel_but)
 
         self.setLayout(layout)
-
-        self.thread = ProgressParser(pipe)
-        self.thread.PROGRESS_TITLE.connect(self.label_update)
-        self.thread.PROGRESS_VALUE.connect(self.progress_update)
-
-        self.thread.start()
 
     def __len__(self):
         return len(self.info)
@@ -227,31 +246,6 @@ class ProgressWidget(QtWidgets.QFrame):
         if res == message.Yes:
             self.CANCEL.emit(self.dev)
 
-    def new_pipe(self, pipe: PIPE):
-
-        self.thread.pipe = pipe
-
-    @QtCore.pyqtSlot(str, str)
-    def label_update(self, mtype: str, text: str):
-
-        if mtype == 'PRGC':
-            self.track_label.setText(text)
-        elif mtype == 'PRGT':
-            self.disc_label.setText(text)
-
-    @QtCore.pyqtSlot(int, int, int)
-    def progress_update(self, current: int, total: int, maximum: int):
-
-        if maximum == -1:
-            self.track_prog.setValue(self.track_prog.maximum())
-            self.disc_prog.setValue(self.disc_prog.maximum())
-            return
-
-        self.track_prog.setMaximum(maximum)
-        self.track_prog.setValue(current)
-        self.disc_prog.setMaximum(maximum)
-        self.disc_prog.setValue(total)
-
     def current_track(self, title: str):
         """
         Update current track index
@@ -263,39 +257,13 @@ class ProgressWidget(QtWidgets.QFrame):
 
         """
 
-        # If the current_title is not None, then refers to previously
-        # processed track and must update the total size of that track
-        # to be maximum size of the track
-        if self.current_title is not None:
-            self.title_sizes[-1] = 100
-            self.track_size(100)
-
         info = self.info['titles'][title]
+        print(info)
         self.metadata.update(info)
 
         # Increment number of titles processed and append file size
         self.n_titles += 1
-        self.title_sizes.append(0)
-
         self.current_title = title
-        self.track_size(0)
-
-    def track_size(self, tsize):
-        """
-        Update track size progress
-
-        Updat
-
-        """
-
-        if len(self.title_sizes) == 0:
-            return
-
-        self.title_sizes[-1] = tsize
-        self.track_prog.setValue(tsize)
-        self.disc_prog.setValue(
-            sum(self.title_sizes)
-        )
 
 
 class Metadata(QtWidgets.QWidget):
@@ -359,26 +327,25 @@ class ProgressParser(QtCore.QThread):
     PROGRESS_TITLE = QtCore.pyqtSignal(str, str)
     PROGRESS_VALUE = QtCore.pyqtSignal(int, int, int)
 
-    def __init__(self, pipe=None):
+    def __init__(self, proc: Popen | None = None, pipe: str = 'stderr'):
         super().__init__()
         self.log = logging.getLogger(__name__)
+        self.proc = proc
         self.pipe = pipe
-
-    def _check_pipe(self):
-
-        if self.pipe is None:
-            return True
-
-        return not self.pipe.closed
 
     def run(self):
 
-        while self.pipe is None or not self.pipe.closed:
-            if self.pipe is None:
+        while self.proc is None or self.proc.poll() is None:
+            if self.proc is None:
                 time.sleep(0.5)
                 continue
+
+            pipe = getattr(self.proc, self.pipe, None)
+            if pipe is None:
+                continue
+
             try:
-                line = self.pipe.readline()
+                line = pipe.readline()
             except Exception:
                 continue
 

@@ -94,7 +94,7 @@ class DiscHandler(QtCore.QObject):
         # Else, return status of the ripper
         return self.ripper.isRunning()
 
-    def terminate(self):
+    def terminate(self, dev: str):
         """
         Kill/close all objects
 
@@ -107,7 +107,7 @@ class DiscHandler(QtCore.QObject):
             self.metadata.close()
             self.metadata = None
         if self.ripper is not None:
-            self.ripper.terminate()
+            self.ripper.terminate(dev)
             self.ripper = None
 
     @QtCore.pyqtSlot(str)
@@ -247,10 +247,14 @@ class Ripper(QtCore.QThread):
         self.extras = extras
         self.filegen = filegen
         self.progress = progress
+        self.tmpdir = os.path.join(
+            outdir,
+            os.path.basename(dev),
+        )
 
         self.progress.CANCEL.connect(self.terminate)
 
-    def rip_disc(self):
+    def rip(self):
 
         if self.info is None:
             self.log.error("%s - No title information found/entered", self.dev)
@@ -275,15 +279,21 @@ class Ripper(QtCore.QThread):
             if title not in paths:
                 _ = self.info['titles'].pop(title)
 
-        self.log.info('Emitting add disc signal')
-        self.progress.ADD_DISC.emit(self.dev, self.info)
+        self.log.debug(
+            "%s - Creating temporary directory : '%s'",
+            self.dev,
+            self.tmpdir,
+        )
+        os.makedirs(self.tmpdir, exist_ok=True)
 
-        for title, path in paths.items():
-            self.rip_title(title, path)
-            if self._dead:
-                return
+        if len(paths) == 1:
+            title, output = list(paths.items())[0]
+            self.rip_title(title, output)
+            return
 
-    def rip_title(self, title, outfile):
+        self.rip_disc(paths)
+
+    def rip_title(self, title: str, output: str):
         """
         Rip a given title from a disc
 
@@ -292,99 +302,190 @@ class Ripper(QtCore.QThread):
 
         Arguments:
             title (str) : Title to rip
-            outfile (str) : Name of the output file
+            output (str) : Name of the output file
 
         Returns:
             bool : True if ripped, False otherwise
 
         """
 
-        outdir = os.path.dirname(outfile)
-        if not os.path.isdir(outdir):
-            os.makedirs(outdir)
+        self.log.debug('%s - Running rip title', self.dev)
 
-        tmpdir = os.path.splitext(
-            os.path.basename(outfile),
-        )[0]
-        tmpdir = os.path.join(outdir, tmpdir)
-        self.log.debug("Creating temporary directory : '%s'", tmpdir)
-        os.makedirs(tmpdir, exist_ok=True)
-
-        if self.progress is not None:
-            self.progress.CUR_TRACK.emit(self.dev, title)
+        self.progress.MKV_ADD_DISC.emit(self.dev, self.info, False)
 
         self.log.info("[%s - %s] Ripping track", self.dev, title)
         self.mkv_thread = makemkv.MakeMKVRip(
-            self.dev,
-            title,
-            tmpdir,
-            noscan=True,
-            minlength=0,
+            'mkv',
+            dev=self.dev,
+            title=title,
+            output=self.tmpdir,
         )
         self.mkv_thread.start()
 
-        # while (
-        #     not RUNNING.wait(timeout=SIZE_POLL)
-        #     and self.mkv_thread.isRunning()
-        # ):
+        if self.progress is not None:
+            self.progress.MKV_CUR_TRACK.emit(self.dev, title)
+            self.mkv_thread.started.wait()
+            self.progress.MKV_NEW_PROCESS.emit(self.dev, self.mkv_thread.proc)
 
-        # while self.mkv_thread.isRunning():
-        while not self.mkv_thread.wait(SIZE_POLL*1000):
-            cursize = directory_size(tmpdir)
-            self.progress.TRACK_SIZE.emit(
-                self.dev,
-                round(cursize/self.sizes[title]*100),
-            )
-
-        # if RUNNING.is_set():
-        #     self.mkv_thread.quit()
-        #     self.mkv_thread.wait()
-        #     return
-
-        if self._dead:
-            self.mkv_thread.terminate()
-            self.mkv_thread.wait()
-            return
+        self.mkv_thread.wait()
 
         files = [
-            os.path.join(tmpdir, item) for item in os.listdir(tmpdir)
+            os.path.join(self.tmpdir, item)
+            for item in os.listdir(self.tmpdir)
         ]
 
-        status = False
         if self.mkv_thread.returncode != 0:
             fdirs = []
             for fname in files:
-                fdirs.append(os.path.dirname(fname))
+                fdir = os.path.dirname(fname)
+                fdirs.append(fdir)
                 os.remove(fname)
             for fdir in set(fdirs):
                 try:
                     os.rmdir(fdir)
                 except FileNotFoundError:
                     pass
+                else:
+                    self.log.debug("%s - Removed dir: %s", self.dev, fdir)
+
             self.log.error(
                 "Error ripping track '%s' from '%s'",
                 title,
                 self.dev,
             )
-        elif len(files) != 1:
-            self.log.error('Too many output files!')
+            return False
+
+        if len(files) != 1:
+            self.log.error("%s - Too many output files!", self.dev)
             for fname in files:
                 os.remove(fname)
-        else:
-            self.log.info("Renaming file '%s' ---> '%s'", files[0], outfile)
-            os.rename(files[0], outfile)
-            status = True
+            return False
+
+        self.log.info(
+            "%s - Renaming file '%s' ---> '%s'",
+            self.dev,
+            files[0],
+            output,
+        )
+        # Ensure output directory exists
+        os.makedirs(
+            os.path.dirname(output),
+            exist_ok=True,
+        )
+        # Rename the file
+        os.rename(files[0], output)
 
         try:
-            os.rmdir(tmpdir)
+            os.rmdir(self.tmpdir)
         except FileNotFoundError:
             pass
 
-        return status
+        return True
+
+    def rip_disc(self, paths: dict):
+        """
+        Backup disc then extract titles
+
+        Create a decrypted backup of the disc and then extract the requested
+        titles. In most cases this will be faster than re-running makemkvcon
+        for each title as there can be signifcant time spent scanning the disc
+        to determine the layout of titles.
+
+        Arguments:
+            paths (dict) : Title and output mapping for the titles to extract
+                from the decrypted disc backup
+
+        Returns:
+            bool : True if ripped, False otherwise
+
+        """
+
+        self.log.debug('%s - Running rip disc', self.dev)
+
+        self.progress.MKV_ADD_DISC.emit(self.dev, self.info, True)
+
+        tmpfile = 'image.iso'
+        tmppath = os.path.join(self.tmpdir, tmpfile)
+        self.mkv_thread = makemkv.MakeMKVRip(
+            'backup',
+            dev=self.dev,
+            decrypt=True,
+            output=tmppath,
+        )
+        self.mkv_thread.start()
+
+        if self.progress is not None:
+            # Need option for full disc
+            # self.progress.MKV_CUR_TRACK.emit(self.dev, title)
+            self.mkv_thread.started.wait()
+            self.progress.MKV_NEW_PROCESS.emit(self.dev, self.mkv_thread.proc)
+
+        self.mkv_thread.wait()
+
+        if self.mkv_thread.returncode != 0:
+            self.log.warning("%s - Error backing up disc", self.dev)
+            try:
+                os.remove(tmppath)
+            except FileNotFoundError:
+                pass
+            os.rmdir(self.tmpdir)
+            self.log.debug("%s - Removed dir: %s", self.dev, self.tmpdir)
+            return
+
+        for title, output in paths.items():
+            mkv_thread = makemkv.MakeMKVRip(
+                'mkv',
+                iso=tmppath,
+                title=title,
+                output=self.tmpdir,
+            )
+            mkv_thread.start()
+            mkv_thread.wait()
+            if mkv_thread.returncode != 0:
+                self.log.warning(
+                    "%s - Failed to extract title %s from backup %s",
+                    self.dev,
+                    title,
+                    tmppath,
+                )
+                continue
+
+            files = [
+                os.path.join(self.tmpdir, item)
+                for item in os.listdir(self.tmpdir)
+                if item != tmpfile
+            ]
+
+            if len(files) != 1:
+                self.log.error("%s - Too many output files!", self.dev)
+                for fname in files:
+                    os.remove(fname)
+                continue
+
+            self.log.info(
+                "%s - Renaming file '%s' ---> '%s'",
+                self.dev,
+                files[0],
+                output,
+            )
+            # Ensure output directory exists
+            os.makedirs(
+                os.path.dirname(output),
+                exist_ok=True,
+            )
+            # Rename the file
+            os.rename(files[0], output)
+
+        try:
+            os.rmdir(self.tmpdir)
+        except FileNotFoundError:
+            pass
+
+        return True
 
     def run(self):
-        self.rip_disc()
-        self.progress.REMOVE_DISC.emit(self.dev)
+        self.rip()
+        self.progress.MKV_REMOVE_DISC.emit(self.dev)
         subprocess.call(['eject', self.dev])
         self.log.info("%s - Ripper thread finished", self.dev)
 
@@ -393,6 +494,7 @@ class Ripper(QtCore.QThread):
         if dev != self.dev:
             return
 
+        self.log.info("%s - Terminating rip", dev)
         self._dead = True
         if self.mkv_thread is None:
             return

@@ -198,7 +198,7 @@ class UdevWatchdog(QtCore.QThread):
 
         if proc.isRunning():
             self.log.warning("%s - Killing the ripper process!", dev)
-            proc.terminate()
+            proc.terminate(dev)
             return
 
     def quit(self, *args, **kwargs):

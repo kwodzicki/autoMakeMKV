@@ -375,11 +375,6 @@ class Ripper(QtCore.QThread):
         # Rename the file
         os.rename(files[0], output)
 
-        try:
-            os.rmdir(self.tmpdir)
-        except FileNotFoundError:
-            pass
-
         return True
 
     def rip_disc(self, paths: dict):
@@ -477,7 +472,7 @@ class Ripper(QtCore.QThread):
             os.rename(files[0], output)
 
         try:
-            os.rmdir(self.tmpdir)
+            os.remove(tmppath)
         except FileNotFoundError:
             pass
 
@@ -485,6 +480,12 @@ class Ripper(QtCore.QThread):
 
     def run(self):
         self.rip()
+
+        try:
+            os.rmdir(self.tmpdir)
+        except Exception as err:
+            self.log.info("%s - Failed to remove directory", self.dev, err)
+
         self.progress.MKV_REMOVE_DISC.emit(self.dev)
         subprocess.call(['eject', self.dev])
         self.log.info("%s - Ripper thread finished", self.dev)

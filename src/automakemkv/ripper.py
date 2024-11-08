@@ -94,7 +94,7 @@ class DiscHandler(QtCore.QObject):
         # Else, return status of the ripper
         return self.ripper.isRunning()
 
-    def terminate(self, dev: str):
+    def terminate(self):
         """
         Kill/close all objects
 
@@ -107,7 +107,7 @@ class DiscHandler(QtCore.QObject):
             self.metadata.close()
             self.metadata = None
         if self.ripper is not None:
-            self.ripper.terminate(dev)
+            self.ripper.terminate(self.dev)
             self.ripper = None
 
     @QtCore.pyqtSlot(str)

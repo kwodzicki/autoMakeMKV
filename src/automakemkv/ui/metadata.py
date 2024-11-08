@@ -109,7 +109,7 @@ class DiscMetadataEditor(dialogs.MyQDialog):
             self.loadDisc.started.wait()
             # Update process to read from in the progress widget
             # self.progress.new_process(self.loadDisc.proc)
-            self.progress.MKV_NEW_PROCESS.emit(self.loadDisc.proc)
+            self.progress.NEW_PROCESS.emit(self.loadDisc.proc)
 
         self.show()
 

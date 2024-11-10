@@ -332,6 +332,7 @@ class Ripper(QtCore.QThread):
         files = [
             os.path.join(self.tmpdir, item)
             for item in os.listdir(self.tmpdir)
+            if item.endswith('.mkv')
         ]
 
         if self.mkv_thread.returncode != 0:
@@ -355,8 +356,12 @@ class Ripper(QtCore.QThread):
             )
             return False
 
-        if len(files) != 1:
-            self.log.error("%s - Too many output files!", self.dev)
+        if len(files) == 0:
+            self.log.error("%s - Something went wrong, no output file found!")
+            return False
+
+        if len(files) > 1:
+            self.log.error("%s - Too many output files: %s", self.dev, files)
             for fname in files:
                 os.remove(fname)
             return False
@@ -484,7 +489,11 @@ class Ripper(QtCore.QThread):
         try:
             os.rmdir(self.tmpdir)
         except Exception as err:
-            self.log.info("%s - Failed to remove directory", self.dev, err)
+            self.log.info(
+                "%s - Failed to remove directory: %s",
+                self.dev,
+                err,
+            )
 
         self.progress.MKV_REMOVE_DISC.emit(self.dev)
         subprocess.call(['eject', self.dev])

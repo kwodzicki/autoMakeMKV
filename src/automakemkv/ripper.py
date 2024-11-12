@@ -22,6 +22,9 @@ class DiscHandler(QtCore.QObject):
 
     """
 
+    FAILURE = QtCore.pyqtSignal(str)
+    SUCCESS = QtCore.pyqtSignal(str)
+
     def __init__(
         self,
         dev: str,
@@ -215,6 +218,8 @@ class DiscHandler(QtCore.QObject):
                 self.filegen,
                 self.progress_dialog,
             )
+            self.ripper.FAILURE.connect(self.FAILURE.emit)
+            self.ripper.SUCCESS.connect(self.SUCCESS.emit)
             self.ripper.start()
             return
 
@@ -222,6 +227,9 @@ class DiscHandler(QtCore.QObject):
 
 
 class Ripper(QtCore.QThread):
+
+    FAILURE = QtCore.pyqtSignal(str)
+    SUCCESS = QtCore.pyqtSignal(str)
 
     def __init__(
         self,
@@ -320,6 +328,8 @@ class Ripper(QtCore.QThread):
             title=title,
             output=self.tmpdir,
         )
+        self.mkv_thread.FAILURE.connect(self.FAILURE.emit)
+        self.mkv_thread.SUCCESS.connect(self.SUCCESS.emit)
         self.mkv_thread.start()
 
         if self.progress is not None:
@@ -357,7 +367,10 @@ class Ripper(QtCore.QThread):
             return False
 
         if len(files) == 0:
-            self.log.error("%s - Something went wrong, no output file found!")
+            self.log.error(
+                "%s - Something went wrong, no output file found!",
+                self.dev,
+            )
             return False
 
         if len(files) > 1:
@@ -412,6 +425,8 @@ class Ripper(QtCore.QThread):
             decrypt=True,
             output=tmppath,
         )
+        self.mkv_thread.FAILURE.connect(self.FAILURE.emit)
+        self.mkv_thread.SUCCESS.connect(self.SUCCESS.emit)
         self.mkv_thread.start()
 
         if self.progress is not None:
@@ -433,15 +448,24 @@ class Ripper(QtCore.QThread):
             return
 
         for title, output in paths.items():
-            mkv_thread = makemkv.MakeMKVRip(
+            self.mkv_thread = makemkv.MakeMKVRip(
                 'mkv',
                 iso=tmppath,
                 title=title,
                 output=self.tmpdir,
             )
-            mkv_thread.start()
-            mkv_thread.wait()
-            if mkv_thread.returncode != 0:
+            # We don't want to signal for each track because we assume that
+            # if the whole disc ripped, then the titles will be extracted
+            # correctly.
+            #
+            # self.mkv_thread.FAILURE.connect(self.FAILURE.emit)
+            # self.mkv_thread.SUCCESS.connect(self.SUCCESS.emit)
+            self.mkv_thread.start()
+            self.mkv_thread.started.wait()
+            self.progress.MKV_NEW_PROCESS.emit(self.dev, self.mkv_thread.proc)
+            self.mkv_thread.wait()
+
+            if self.mkv_thread.returncode != 0:
                 self.log.warning(
                     "%s - Failed to extract title %s from backup %s",
                     self.dev,

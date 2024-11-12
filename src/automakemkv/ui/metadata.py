@@ -95,6 +95,7 @@ class DiscMetadataEditor(dialogs.MyQDialog):
             discid,
             dbdir=self.dbdir,
         )
+        self.loadDisc.FAILURE.connect(self.load_failed)
         self.loadDisc.SIGNAL.connect(self.msgs.append)
         self.loadDisc.finished.connect(self.buildTitleTree)
 
@@ -132,6 +133,12 @@ class DiscMetadataEditor(dialogs.MyQDialog):
         file_menu.addSeparator()
         file_menu.addAction(action_quit)
         return menu_bar
+
+    @QtCore.pyqtSlot(str)
+    def load_failed(self, device: str):
+
+        dialog = dialogs.RipFailed(device)
+        dialog.exec_()
 
     def quit(self, *args, **kwargs):
         self.loadDisc.quit()

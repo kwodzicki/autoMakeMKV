@@ -195,6 +195,8 @@ class ProgressWidget(QtWidgets.QFrame):
     ):
         super().__init__()
 
+        self.log = logging.getLogger(__name__)
+
         self.setFrameStyle(
             QtWidgets.QFrame.StyledPanel | QtWidgets.QFrame.Plain
         )
@@ -217,22 +219,38 @@ class ProgressWidget(QtWidgets.QFrame):
 
         self.progress = BasicProgressWidget(dev, proc=proc)
         self.NEW_PROCESS.connect(
-            self.progress.new_process
+            # self.progress.new_process
+            self.new_process
         )
 
         self.cancel_but = QtWidgets.QPushButton("Cancel Rip")
         self.cancel_but.clicked.connect(self.cancel)
 
-        layout = QtWidgets.QVBoxLayout()
-        layout.addWidget(self.drive)
-        layout.addWidget(self.metadata)
-        layout.addWidget(self.progress)
-        layout.addWidget(self.cancel_but)
+        layout = QtWidgets.QGridLayout()
+        layout.addWidget(self.drive, 0, 0)
+        layout.addWidget(self.metadata, 5, 0)
+        layout.addWidget(self.progress, 10, 0)
+        layout.addWidget(self.cancel_but, 15, 0)
 
         self.setLayout(layout)
 
     def __len__(self):
         return len(self.info)
+
+    @QtCore.pyqtSlot(Popen)
+    def new_process(self, proc: Popen):
+        self.log.debug(
+            "%s - Creating new basic widget",
+            self.dev,
+        )
+
+        layout = self.layout()
+        layout.removeWidget(self.progress)
+        self.progress.close()
+
+        self.progress = BasicProgressWidget(self.dev, proc=proc)
+
+        layout.addWidget(self.progress, 10, 0)
 
     def cancel(self, *args, **kwargs):
 
@@ -332,6 +350,7 @@ class ProgressParser(QtCore.QThread):
         self.log = logging.getLogger(__name__)
         self.proc = proc
         self.pipe = pipe
+        self.t0 = None
 
     def run(self):
 
@@ -344,6 +363,9 @@ class ProgressParser(QtCore.QThread):
             if pipe is None:
                 continue
 
+            if self.t0 is None:
+                self.t0 = time.monotonic()
+
             try:
                 line = pipe.readline()
             except Exception:
@@ -353,7 +375,8 @@ class ProgressParser(QtCore.QThread):
             vals = ":".join(vals).split(',')
 
             if mtype == 'PRGV':
-                self.PROGRESS_VALUE.emit(*map(int, vals))
+                current, total, maximum = map(int, vals)
+                self.PROGRESS_VALUE.emit(current, total, maximum)
                 continue
 
             self.PROGRESS_TITLE.emit(

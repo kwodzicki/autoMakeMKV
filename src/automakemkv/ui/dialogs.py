@@ -37,6 +37,50 @@ class MissingOutdirDialog(QtWidgets.QDialog):
         self.setLayout(self.layout)
 
 
+class RipFailure(QtWidgets.QDialog):
+
+    def __init__(self, device: str, name: str = NAME):
+        super().__init__()
+
+        self._name = name
+        self.setWindowTitle(f"{self._name}: Rip Failed!")
+
+        QBtn = QtWidgets.QDialogButtonBox.Ok
+
+        self.buttonBox = QtWidgets.QDialogButtonBox(QBtn)
+        self.buttonBox.accepted.connect(self.accept)
+
+        self.layout = QtWidgets.QVBoxLayout()
+        message = QtWidgets.QLabel(
+            f"Rip failed for {device}",
+        )
+        self.layout.addWidget(message)
+        self.layout.addWidget(self.buttonBox)
+        self.setLayout(self.layout)
+
+
+class RipSuccess(QtWidgets.QDialog):
+
+    def __init__(self, device: str, name: str = NAME):
+        super().__init__()
+
+        self._name = name
+        self.setWindowTitle(f"{self._name}: Rip Success!")
+
+        QBtn = QtWidgets.QDialogButtonBox.Ok
+
+        self.buttonBox = QtWidgets.QDialogButtonBox(QBtn)
+        self.buttonBox.accepted.connect(self.accept)
+
+        self.layout = QtWidgets.QVBoxLayout()
+        message = QtWidgets.QLabel(
+            f"Rip completed for {device}",
+        )
+        self.layout.addWidget(message)
+        self.layout.addWidget(self.buttonBox)
+        self.setLayout(self.layout)
+
+
 class SettingsWidget(QtWidgets.QDialog):
 
     def __init__(self, *args, **kwargs):

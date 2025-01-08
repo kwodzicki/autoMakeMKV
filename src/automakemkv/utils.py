@@ -1,6 +1,6 @@
 import os
 
-from . import UUID_ROOT
+from . import UUID_ROOT, HOMEDIR
 
 
 def get_discid(discDev: str, root: str = UUID_ROOT, **kwargs) -> str | None:
@@ -28,3 +28,25 @@ def get_discid(discDev: str, root: str = UUID_ROOT, **kwargs) -> str | None:
             return item
 
     return None
+
+
+def load_makemkv_settings() -> dict:
+    """
+    Load MakeMKV settings file
+
+    """
+
+    settings = {}
+    file = os.path.join(HOMEDIR, '.MakeMKV', 'settings.conf')
+    if not os.path.isfile(file):
+        return settings
+
+    with open(file, mode='r') as iid:
+        for line in iid.readlines():
+            try:
+                key, val = line.strip().split('=')
+            except Exception:
+                continue
+            settings[key.strip()] = val.strip().strip('"')
+
+    return settings

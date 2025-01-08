@@ -1,6 +1,7 @@
 import logging
 import time
 
+import re
 from subprocess import Popen
 
 from PyQt5 import QtWidgets
@@ -17,8 +18,9 @@ class ProgressDialog(QtWidgets.QWidget):
     MKV_ADD_DISC = QtCore.pyqtSignal(str, dict, bool)
     # Arg is dev of disc to remove
     MKV_REMOVE_DISC = QtCore.pyqtSignal(str)
-    # Args are dev of disc to attach process to and the process
-    MKV_NEW_PROCESS = QtCore.pyqtSignal(str, Popen)
+    # Args are dev of disc to attach process to, the Popen object, and the
+    # pipe to read from
+    MKV_NEW_PROCESS = QtCore.pyqtSignal(str, Popen, str)
     # First arg is dev, second is track num
     MKV_CUR_TRACK = QtCore.pyqtSignal(str, str)
     # First arg is dev, second is track num
@@ -72,13 +74,13 @@ class ProgressDialog(QtWidgets.QWidget):
             self.setVisible(False)
         self.adjustSize()
 
-    @QtCore.pyqtSlot(str, Popen)
-    def mkv_new_process(self, dev: str, proc: Popen):
+    @QtCore.pyqtSlot(str, Popen, str)
+    def mkv_new_process(self, dev: str, proc: Popen, pipe: str):
         widget = self.widgets.get(dev, None)
         if widget is None:
             return
         self.log.debug("%s - Setting new parser process", dev)
-        widget.NEW_PROCESS.emit(proc)
+        widget.NEW_PROCESS.emit(proc, pipe)
 
     @QtCore.pyqtSlot(str)
     def mkv_current_disc(self, dev: str):
@@ -111,9 +113,14 @@ class BasicProgressWidget(QtWidgets.QWidget):
     """
 
     CANCEL = QtCore.pyqtSignal(str)  # dev to cancel rip of
-    NEW_PROCESS = QtCore.pyqtSignal(Popen)
+    NEW_PROCESS = QtCore.pyqtSignal(Popen, str)
 
-    def __init__(self, dev: str, proc: Popen | None = None):
+    def __init__(
+        self,
+        dev: str,
+        proc: Popen | None = None,
+        pipe: str | None = None,
+    ):
         super().__init__()
 
         self.log = logging.getLogger(__name__)
@@ -134,7 +141,7 @@ class BasicProgressWidget(QtWidgets.QWidget):
 
         self.setLayout(layout)
 
-        self.thread = ProgressParser(proc)
+        self.thread = ProgressParser(proc, pipe=pipe)
         self.thread.PROGRESS_TITLE.connect(self.label_update)
         self.thread.PROGRESS_VALUE.connect(self.progress_update)
 
@@ -142,8 +149,8 @@ class BasicProgressWidget(QtWidgets.QWidget):
 
         self.NEW_PROCESS.connect(self.new_process)
 
-    @QtCore.pyqtSlot(Popen)
-    def new_process(self, proc: Popen):
+    @QtCore.pyqtSlot(Popen, str)
+    def new_process(self, proc: Popen, pipe, str):
 
         self.log.debug(
             "%s - Updating process for parsing progress",
@@ -184,7 +191,7 @@ class ProgressWidget(QtWidgets.QFrame):
     """
 
     CANCEL = QtCore.pyqtSignal(str)  # dev to cancel rip of
-    NEW_PROCESS = QtCore.pyqtSignal(Popen)
+    NEW_PROCESS = QtCore.pyqtSignal(Popen, str)
 
     def __init__(
         self,
@@ -219,7 +226,6 @@ class ProgressWidget(QtWidgets.QFrame):
 
         self.progress = BasicProgressWidget(dev, proc=proc)
         self.NEW_PROCESS.connect(
-            # self.progress.new_process
             self.new_process
         )
 
@@ -237,8 +243,8 @@ class ProgressWidget(QtWidgets.QFrame):
     def __len__(self):
         return len(self.info)
 
-    @QtCore.pyqtSlot(Popen)
-    def new_process(self, proc: Popen):
+    @QtCore.pyqtSlot(Popen, str)
+    def new_process(self, proc: Popen, pipe: str):
         self.log.debug(
             "%s - Creating new basic widget",
             self.dev,
@@ -248,7 +254,7 @@ class ProgressWidget(QtWidgets.QFrame):
         layout.removeWidget(self.progress)
         self.progress.close()
 
-        self.progress = BasicProgressWidget(self.dev, proc=proc)
+        self.progress = BasicProgressWidget(self.dev, proc=proc, pipe=pipe)
 
         layout.addWidget(self.progress, 10, 0)
 
@@ -275,8 +281,10 @@ class ProgressWidget(QtWidgets.QFrame):
 
         """
 
-        info = self.info['titles'][title]
-        print(info)
+        info = self.info.get('titles', {}).get(title, None)
+        if info is None:
+            return
+
         self.metadata.update(info)
 
         # Increment number of titles processed and append file size
@@ -294,9 +302,16 @@ class Metadata(QtWidgets.QWidget):
         self.series = BaseLabel('Series')
         self.season = BaseLabel('Season')
         self.episode = BaseLabel('Episode')
+        self.extra = BaseLabel('Extra')
 
+        self._idx = -1
         self._layout = QtWidgets.QGridLayout()
         self.setLayout(self._layout)
+
+    @property
+    def idx(self):
+        self._idx += 1
+        return self._idx
 
     def update(self, info):
 
@@ -306,15 +321,28 @@ class Metadata(QtWidgets.QWidget):
         elif info['isSeries']:
             self.is_series(info)
 
-    def is_movie(self, info):
+        extra_type = info.get('extra', '')
+        if extra_type == '':
+            return
+
+        extra = info.get('extraTitle', '')
+        if extra == '':
+            return
+
+        self.extra.setText(
+            f"{extra_type.title()}: {extra}"
+        )
+        self.extra.addToLayout(self._layout, self.idx)
+
+    def is_movie(self, info: dict):
 
         self.title.setText(info['title'])
         self.year.setText(info['year'])
 
-        self.title.addToLayout(self._layout, 0)
-        self.year.addToLayout(self._layout, 1)
+        self.title.addToLayout(self._layout, self.idx)
+        self.year.addToLayout(self._layout, self.idx)
 
-    def is_series(self, info):
+    def is_series(self, info: dict):
 
         self.series.setText(info['title'])
         self.year.setText(info['year'])
@@ -322,14 +350,14 @@ class Metadata(QtWidgets.QWidget):
         self.season.setText(info['season'])
         self.episode.setText(info['episode'])
 
-        self.series.addToLayout(self._layout, 0)
-        self.year.addToLayout(self._layout, 1)
-        self.title.addToLayout(self._layout, 2)
-        self.season.addToLayout(self._layout, 3)
-        self.episode.addToLayout(self._layout, 4)
+        self.series.addToLayout(self._layout, self.idx)
+        self.year.addToLayout(self._layout, self.idx)
+        self.title.addToLayout(self._layout, self.idx)
+        self.season.addToLayout(self._layout, self.idx)
+        self.episode.addToLayout(self._layout, self.idx)
 
     def clear(self):
-
+        self._idx = -1
         for i in reversed(range(self._layout.count())):
             widget = self._layout.itemAt(i).widget()
             self._layout.removeWidget(widget)
@@ -345,11 +373,15 @@ class ProgressParser(QtCore.QThread):
     PROGRESS_TITLE = QtCore.pyqtSignal(str, str)
     PROGRESS_VALUE = QtCore.pyqtSignal(int, int, int)
 
-    def __init__(self, proc: Popen | None = None, pipe: str = 'stderr'):
+    def __init__(
+        self,
+        proc: Popen | None = None,
+        pipe: str | None = None,
+    ):
         super().__init__()
         self.log = logging.getLogger(__name__)
         self.proc = proc
-        self.pipe = pipe
+        self.pipe = pipe or 'stdout'
         self.t0 = None
 
     def run(self):
@@ -371,21 +403,42 @@ class ProgressParser(QtCore.QThread):
             except Exception:
                 continue
 
-            mtype, *vals = line.split(':')
-            vals = ":".join(vals).split(',')
-
-            if mtype == 'PRGV':
-                current, total, maximum = map(int, vals)
-                self.PROGRESS_VALUE.emit(current, total, maximum)
-                continue
-
-            self.PROGRESS_TITLE.emit(
-                mtype,
-                vals[-1].rstrip().strip('"'),
-            )
+            cli = self.proc.args[0]
+            if cli == 'makemkvcon':
+                self.parse_makemkvcon(line)
+            elif cli == 'mkvmerge':
+                self.parse_mkvmerge(line)
+            else:
+                self.log.error("Parser not implemented for: %s", cli)
 
         self.PROGRESS_VALUE.emit(-1, -1, -1)
         self.log.debug("Progress processor thread dead")
+
+    def parse_makemkvcon(self, line):
+        """
+        Parse information from makemkvcon
+
+        """
+
+        mtype, *vals = line.split(':')
+        vals = ":".join(vals).split(',')
+
+        if mtype == 'PRGV':
+            current, total, maximum = map(int, vals)
+            self.PROGRESS_VALUE.emit(current, total, maximum)
+            return
+
+        self.PROGRESS_TITLE.emit(
+            mtype,
+            vals[-1].rstrip().strip('"'),
+        )
+
+    def parse_mkvmerge(self, line):
+        mm = re.search(r'Progress:\s*(\d+)%', line)
+        if not mm:
+            return
+        prog = int(mm.group(1))
+        self.PROGRESS_VALUE.emit(prog, prog, 100)
 
 
 class BaseLabel(QtWidgets.QWidget):

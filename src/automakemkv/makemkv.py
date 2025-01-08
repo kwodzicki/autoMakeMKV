@@ -189,13 +189,13 @@ class MakeMKVThread(QtCore.QThread):
                     val = str(val).lower()
                 opts.append(f"--{key}={val}")
 
-        if self.command not in COMMANDS:
-            self.log.error(
-                "%s - Unsupported command : '%s'",
-                self.source[1],
-                self.command,
-            )
-            return
+        # if self.command not in COMMANDS:
+        #     self.log.error(
+        #         "%s - Unsupported command : '%s'",
+        #         self.source[1],
+        #         self.command,
+        #     )
+        #     return
 
         cmd = [
             'makemkvcon',
@@ -275,13 +275,14 @@ class MakeMKVThread(QtCore.QThread):
 
 class MakeMKVRip(MakeMKVThread):
 
-    def __init__(self, command: str, **kwargs):
+    def __init__(self, command: str, pipe: str | None = None, **kwargs):
         kwargs = {
             **DEFAULT_KWARGS,
             **kwargs,
         }
 
         super().__init__(command, **kwargs)
+        self.pipe = pipe or 'stderr'
 
     def run(self):
 

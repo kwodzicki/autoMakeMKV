@@ -150,7 +150,15 @@ class BasicProgressWidget(QtWidgets.QWidget):
         self.NEW_PROCESS.connect(self.new_process)
 
     @QtCore.pyqtSlot(Popen, str)
-    def new_process(self, proc: Popen, pipe, str):
+    def new_process(self, proc: Popen, pipe: str):
+        """
+        Handler for new disc scan process
+
+        Arguments:
+            proc (Popen): Popen object of makemkvcon scan
+            pipe (str): Not used; just input empty string
+
+        """
 
         self.log.debug(
             "%s - Updating process for parsing progress",

@@ -100,17 +100,19 @@ class DiscMetadataEditor(dialogs.MyQDialog):
         self.loadDisc.finished.connect(self.buildTitleTree)
 
         if load_existing:
+            self.log.info("Loading existing information")
             path = utils.file_from_discid(self.discid, dbdir=self.dbdir)
             self.loadDisc.loadFile(json=path)
             self.buildTitleTree(
                 *utils.load_metadata(discid=self.discid, dbdir=self.dbdir)
             )
         else:
+            self.log.info("Loading new disc")
             self.loadDisc.start()
             self.loadDisc.started.wait()
             # Update process to read from in the progress widget
             # self.progress.new_process(self.loadDisc.proc)
-            self.progress.NEW_PROCESS.emit(self.loadDisc.proc)
+            self.progress.NEW_PROCESS.emit(self.loadDisc.proc, '')
 
         self.show()
 
@@ -330,17 +332,17 @@ class DiscMetadataEditor(dialogs.MyQDialog):
             # if 'Segments Map' not in title.info:
             #    title.info['Segments Map'] = titleInfo['Segments Map']
             title.setText(0, self.DEFAULT_TITLE)
-            title.setText(1, titleInfo['Tree Info'])
+            title.setText(1, titleInfo.get('Tree Info', '??Tree Info??'))
 
             title.setFlags(title.flags() | QtCore.Qt.ItemIsUserCheckable)
 
-            for streamID, streamInfo in titleInfo.pop('streams').items():
+            for streamID, streamInfo in titleInfo.pop('streams', {}).items():
                 child = QtWidgets.QTreeWidgetItem(title)
                 child.makeMKVInfo = streamInfo
                 child.isTitle = False
                 child.info = {}
-                child.setText(0, streamInfo['Type'])
-                child.setText(1, streamInfo['Tree Info'])
+                child.setText(0, streamInfo.get('Type' '??Type??'))
+                child.setText(1, streamInfo.get('Tree Info', '??Tree Info??'))
 
         # Run given method one object in QTreeWidget is clicked
         self.titleTree.currentItemChanged.connect(self.selectTitle)

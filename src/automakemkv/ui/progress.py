@@ -2,6 +2,7 @@ import logging
 import time
 
 import re
+from threading import Lock
 from subprocess import Popen
 
 from PyQt5 import QtWidgets
@@ -164,7 +165,7 @@ class BasicProgressWidget(QtWidgets.QWidget):
             "%s - Updating process for parsing progress",
             self.dev,
         )
-        self.thread.proc = proc
+        self.thread.update_proc_pipe(proc=proc, pipe=pipe)
 
     @QtCore.pyqtSlot(str, str)
     def label_update(self, mtype: str, text: str):
@@ -388,9 +389,20 @@ class ProgressParser(QtCore.QThread):
     ):
         super().__init__()
         self.log = logging.getLogger(__name__)
-        self.proc = proc
-        self.pipe = pipe or 'stdout'
         self.t0 = None
+        self._lock = Lock()
+        self._proc = proc
+        self._pipe = pipe or 'stdout'
+
+    @property
+    def proc(self):
+        with self._lock:
+            return self._proc
+
+    @property
+    def pipe(self):
+        with self._lock:
+            return self._pipe
 
     def run(self):
 
@@ -421,6 +433,13 @@ class ProgressParser(QtCore.QThread):
 
         self.PROGRESS_VALUE.emit(-1, -1, -1)
         self.log.debug("Progress processor thread dead")
+
+    def update_proc_pipe(self, proc=None, pipe=None):
+        with self._lock:
+            if proc is not None:
+                self._proc = proc
+            if pipe is not None:
+                self._pipe = pipe
 
     def parse_makemkvcon(self, line):
         """

@@ -362,6 +362,7 @@ class MakeMKVInfo(MakeMKVThread):
         # Start scanning disc
         self.makemkvcon()
 
+        self.log.debug("%s - Streaming data from stdout", self.dev)
         # Open gzip file for storing robot output and write MakeMKV
         # output to file
         with gzip.open(self.info_path, 'wt') as fid:
@@ -409,6 +410,14 @@ class MakeMKVInfo(MakeMKVThread):
                 self.titles[title][AP[tid]] = val.strip('"')
         elif infoType == 'SINFO':
             title, stream, sid, _, val = SPLIT.findall(data)
+            # If title not in the titles object, then add emtpy dict
+            if title not in self.titles:
+                self.titles[title] = {}
+            # If 'streams' not in title object, then add empty dict
+            if 'streams' not in self.titles[title]:
+                self.titles[title]['streams'] = {}
+
+            # Get the 'streams' object for given title
             tt = self.titles[title]['streams']
             if stream not in tt:
                 tt[stream] = {}

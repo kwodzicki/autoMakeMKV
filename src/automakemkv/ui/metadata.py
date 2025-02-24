@@ -51,7 +51,7 @@ class DiscMetadataEditor(dialogs.MyQDialog):
         self.titleTree.setColumnWidth(0, 100)
 
         # Initialize basic progress widget
-        self.progress = progress.BasicProgressWidget(dev)
+        self.progress = progress.BasicProgressWidget(dev, pipe='stderr')
 
         self.infoBox = QtWidgets.QTextEdit()
         self.msgs = QtWidgets.QTextEdit()
@@ -112,7 +112,7 @@ class DiscMetadataEditor(dialogs.MyQDialog):
             self.loadDisc.started.wait()
             # Update process to read from in the progress widget
             # self.progress.new_process(self.loadDisc.proc)
-            self.progress.NEW_PROCESS.emit(self.loadDisc.proc, '')
+            self.progress.NEW_PROCESS.emit(self.loadDisc.proc, 'stderr')
 
         self.show()
 

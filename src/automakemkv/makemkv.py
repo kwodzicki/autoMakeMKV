@@ -10,6 +10,7 @@ import gzip
 
 from threading import Event
 from subprocess import (
+    call,
     check_output,
     Popen,
     PIPE,
@@ -76,6 +77,11 @@ class MakeMKVThread(QtCore.QThread):
 
         super().__init__()
         self.log = logging.getLogger(__name__)
+
+        self._dev = None
+        self._failure = False
+        self._success = False
+
         self.started = Event()
         self.command = command
         self.source = self._parse_source(opts)
@@ -83,9 +89,6 @@ class MakeMKVThread(QtCore.QThread):
         self.output = output
         self.opts = opts
         self.proc = None
-
-        self._failure = False
-        self._success = False
 
     def _parse_source(self, opts):
         """
@@ -117,6 +120,10 @@ class MakeMKVThread(QtCore.QThread):
             self.command = None
             return source
 
+        # Set dev device path here; folling clauses may return
+        if source[0] == 'dev':
+            self._dev = source[1]
+
         # If command is NOT backup or the type IS disc, then return source
         if self.command != 'backup' or source[0] == 'disc':
             return source
@@ -143,6 +150,31 @@ class MakeMKVThread(QtCore.QThread):
             return None
 
         return ['disc', lookup[dev]]
+
+    def _check_type(self, source):
+        if self.source is None:
+            return False
+        return self.source[0] == source
+
+    @property
+    def isiso(self):
+        return self._check_type('iso')
+
+    @property
+    def isfile(self):
+        return self._check_type('file')
+
+    @property
+    def isdisc(self):
+        return self._check_type('disc')
+
+    @property
+    def isdev(self):
+        return self._check_type('dev')
+
+    @property
+    def dev(self):
+        return self._dev
 
     @property
     def returncode(self):
@@ -299,6 +331,11 @@ class MakeMKVRip(MakeMKVThread):
             self.check_result(line)
         self.proc.wait()
         self.proc.communicate()
+
+        if self.dev is not None:
+            self.log.debug("%s - Ejecting disc", self.dev)
+            call(['eject', self.dev])
+
         self.log.info("MakeMKVRip thread dead")
 
 

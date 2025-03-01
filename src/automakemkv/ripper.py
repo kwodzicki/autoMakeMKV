@@ -682,7 +682,6 @@ class Ripper(QtCore.QThread):
 
         if self.progress is not None:
             self.progress.MKV_REMOVE_DISC.emit(self.dev)
-        subprocess.call(['eject', self.dev])
         self.log.info("%s - Ripper thread finished", self.dev)
 
     @QtCore.pyqtSlot(str)

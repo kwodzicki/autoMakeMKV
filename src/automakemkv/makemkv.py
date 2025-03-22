@@ -10,6 +10,7 @@ import gzip
 
 from threading import Event
 from subprocess import (
+    call,
     check_output,
     Popen,
     PIPE,
@@ -35,6 +36,7 @@ DEFAULT_KWARGS = {
 SWITCHES = ('noscan', 'robot', 'decrypt')
 SOURCES = ('iso', 'file', 'disc', 'dev')
 COMMANDS = ('info', 'mkv', 'backup', 'f', 'reg')
+RESULTS_PREFIX = ("MSG:5004", "MSG:5037")
 
 
 class MakeMKVThread(QtCore.QThread):
@@ -44,6 +46,10 @@ class MakeMKVThread(QtCore.QThread):
     Run the makemkvcron CLI and pipe all stdout/stderr data to python log
 
     """
+
+    # Send the dev device that failed
+    FAILURE = QtCore.pyqtSignal(str)
+    SUCCESS = QtCore.pyqtSignal(str)
 
     def __init__(
         self,
@@ -71,6 +77,11 @@ class MakeMKVThread(QtCore.QThread):
 
         super().__init__()
         self.log = logging.getLogger(__name__)
+
+        self._dev = None
+        self._failure = False
+        self._success = False
+
         self.started = Event()
         self.command = command
         self.source = self._parse_source(opts)
@@ -109,6 +120,10 @@ class MakeMKVThread(QtCore.QThread):
             self.command = None
             return source
 
+        # Set dev device path here; folling clauses may return
+        if source[0] == 'dev':
+            self._dev = source[1]
+
         # If command is NOT backup or the type IS disc, then return source
         if self.command != 'backup' or source[0] == 'disc':
             return source
@@ -136,6 +151,35 @@ class MakeMKVThread(QtCore.QThread):
 
         return ['disc', lookup[dev]]
 
+    def _check_type(self, source):
+        if self.source is None:
+            return False
+        return self.source[0] == source
+
+    @property
+    def isiso(self):
+        return self._check_type('iso')
+
+    @property
+    def isfile(self):
+        return self._check_type('file')
+
+    @property
+    def isdisc(self):
+        return self._check_type('disc')
+
+    @property
+    def isdev(self):
+        return self._check_type('dev')
+
+    @property
+    def dev(self):
+        return self._dev
+
+    @dev.setter
+    def dev(self, val):
+        self._dev = val
+
     @property
     def returncode(self):
         """Get returncode from processs"""
@@ -143,6 +187,20 @@ class MakeMKVThread(QtCore.QThread):
         if self.proc:
             return self.proc.returncode
         return None
+
+    @property
+    def stdout(self):
+        if self.proc is None:
+            return None
+
+        return self.proc.stdout
+
+    @property
+    def stderr(self):
+        if self.proc is None:
+            return None
+
+        return self.proc.stderr
 
     def makemkvcon(self):
         """
@@ -167,13 +225,13 @@ class MakeMKVThread(QtCore.QThread):
                     val = str(val).lower()
                 opts.append(f"--{key}={val}")
 
-        if self.command not in COMMANDS:
-            self.log.error(
-                "%s - Unsupported command : '%s'",
-                self.source[1],
-                self.command,
-            )
-            return
+        # if self.command not in COMMANDS:
+        #     self.log.error(
+        #         "%s - Unsupported command : '%s'",
+        #         self.source[1],
+        #         self.command,
+        #     )
+        #     return
 
         cmd = [
             'makemkvcon',
@@ -205,6 +263,43 @@ class MakeMKVThread(QtCore.QThread):
 
         pass
 
+    def check_result(self, line: str) -> str:
+
+        # If not a result-of-rip message, return line
+        if not line.startswith(RESULTS_PREFIX):
+            return line
+
+        # If already determined success/failure, return line
+        if self._success or self._failure:
+            return line
+
+        # Try to extact the number of success/failures from messages
+        info = [val.strip().strip('"') for val in line.split(',')]
+        try:
+            success, failure = map(int, info[-2:])
+        except Exception as err:
+            self.log.debug(
+                "%s - Failed to parse success/failure values: %s",
+                self.source[1],
+                err,
+            )
+            return line
+
+        if failure > 0:
+            self._failure = True
+            self.log.error("%s - Rip failed", self.source[1])
+            self.FAILURE.emit('{}:{}'.format(*self.source))
+        elif success > 0:
+            self._success = True
+            self.log.error("%s - Rip success", self.source[1])
+            self.SUCCESS.emit('{}:{}'.format(*self.source))
+        else:
+            self.log.warning(
+                "%s - Ripped nothing; no success or failure reported",
+                self.source[1],
+            )
+        return line
+
     def terminate(self):
         """Kill the MakeMKV Process"""
 
@@ -216,13 +311,14 @@ class MakeMKVThread(QtCore.QThread):
 
 class MakeMKVRip(MakeMKVThread):
 
-    def __init__(self, command: str, **kwargs):
+    def __init__(self, command: str, pipe: str | None = None, **kwargs):
         kwargs = {
             **DEFAULT_KWARGS,
             **kwargs,
         }
 
         super().__init__(command, **kwargs)
+        self.pipe = pipe or 'stderr'
 
     def run(self):
 
@@ -230,14 +326,20 @@ class MakeMKVRip(MakeMKVThread):
         if self.proc is None:
             return
 
-        for line in iter(self.proc.stdout.readline, ''):
+        for line in iter(self.stdout.readline, ''):
             self.log.debug(
                 "%s - %s",
                 self.source[1],
                 line.rstrip(),
             )
+            self.check_result(line)
         self.proc.wait()
         self.proc.communicate()
+
+        if self.dev is not None:
+            self.log.debug("%s - Ejecting disc", self.dev)
+            call(['eject', self.dev])
+
         self.log.info("MakeMKVRip thread dead")
 
 
@@ -301,12 +403,14 @@ class MakeMKVInfo(MakeMKVThread):
         # Start scanning disc
         self.makemkvcon()
 
+        self.log.debug("%s - Streaming data from stdout", self.dev)
         # Open gzip file for storing robot output and write MakeMKV
         # output to file
         with gzip.open(self.info_path, 'wt') as fid:
-            for line in iter(self.proc.stdout.readline, ''):
+            for line in iter(self.stdout.readline, ''):
                 fid.write(line)
                 self.parse_line(line)
+                self.check_result(line)
         self.proc.wait()
         self.proc.communicate()
 
@@ -347,6 +451,14 @@ class MakeMKVInfo(MakeMKVThread):
                 self.titles[title][AP[tid]] = val.strip('"')
         elif infoType == 'SINFO':
             title, stream, sid, _, val = SPLIT.findall(data)
+            # If title not in the titles object, then add emtpy dict
+            if title not in self.titles:
+                self.titles[title] = {}
+            # If 'streams' not in title object, then add empty dict
+            if 'streams' not in self.titles[title]:
+                self.titles[title]['streams'] = {}
+
+            # Get the 'streams' object for given title
             tt = self.titles[title]['streams']
             if stream not in tt:
                 tt[stream] = {}
@@ -365,7 +477,7 @@ def _dev_to_disc(timeout: float | int = 60.0) -> dict:
     output = {}
     try:
         info = check_output(
-            ['makemkvcon', '-r', 'info', 'disc'],
+            ['makemkvcon', '--robot', '--noscan', 'info', 'disc'],
             timeout=timeout,
         )
     except TimeoutExpired as err:

@@ -178,7 +178,7 @@ def video_utils_movie(
     everything: bool,
     extras: bool,
     **kwargs,
-) -> tuple:
+) -> str | None:
     """
     Generate video_utils compliant movie name
 
@@ -206,29 +206,28 @@ def video_utils_movie(
 
     log = logging.getLogger(__name__)
 
-    for tid, title in info['titles'].items():
-        fpath = [video_utils_dbkey(title), '']
-        # If extraTitle is NOT empty, then title is an extra
-        if title['extraTitle'] != '':
-            # If is NOT 'edition' and neither all nor extras is set,
-            # then we aren't ripping title
-            if title['extra'] != 'edition' and not (everything or extras):
-                continue
-            extra = [title['extra'], replace_chars(title['extraTitle'])]
-            if extra[0] != 'edition':
-                extra = extra[::-1]
-            fpath[-1] = '-'.join(extra)
-        elif extras:
-            continue
+    fpath = [video_utils_dbkey(info), '']
+    # If extraTitle is NOT empty, then title is an extra
+    if info['extraTitle'] != '':
+        # If is NOT 'edition' and neither all nor extras is set,
+        # then we aren't ripping title
+        if info['extra'] != 'edition' and not (everything or extras):
+            return None
+        extra = [info['extra'], replace_chars(info['extraTitle'])]
+        if extra[0] != 'edition':
+            extra = extra[::-1]
+        fpath[-1] = '-'.join(extra)
+    elif extras:
+        return None
 
-        log.info(
-            "Will rip: %s (%s) %s-%s",
-            title.get('title', ''),
-            title.get('year', 'XXXX'),
-            title.get('extra', 'extra'),
-            title.get('extraTitle', '') or 'NA',
-        )
-        yield tid, os.path.join(outdir, '.'.join(fpath)+ext)
+    log.info(
+        "Will rip: %s (%s) %s-%s",
+        info.get('title', ''),
+        info.get('year', 'XXXX'),
+        info.get('extra', 'extra'),
+        info.get('extraTitle', '') or 'NA',
+    )
+    return os.path.join(outdir, '.'.join(fpath)+ext)
 
 
 def video_utils_series(
@@ -237,7 +236,7 @@ def video_utils_series(
     ext: str,
     *args,
     **kwargs,
-) -> tuple:
+) -> str | None:
     """
     Function for series output naming
 
@@ -247,6 +246,7 @@ def video_utils_series(
 
     Arguments:
         outdir (str) : File output directory
+        title_id (str): Title number to rip
         info (dict) : Information about all tracks on disc
             that are flagged for ripping.
         ext (str) : File extension to use
@@ -263,34 +263,33 @@ def video_utils_series(
 
     log = logging.getLogger(__name__)
 
-    for tid, title in info['titles'].items():
-        if title['extra'] != '':
-            continue
+    if info['extra'] != '':
+        return None
 
-        season = int(title['season'])
-        season = f"S{season:02d}"
-        episode = list(
-            map(int, title['episode'].split('-'))
-        )
-        if len(episode) == 1:
-            episode = f"E{episode[0]:02d}"
-        elif len(episode) > 1:
-            episode = f"E{min(episode):02d}-{max(episode):02d}"
-        else:
-            raise Exception("Issue with epsiode numbering")
+    season = int(info['season'])
+    season = f"S{season:02d}"
+    episode = list(
+        map(int, info['episode'].split('-'))
+    )
+    if len(episode) == 1:
+        episode = f"E{episode[0]:02d}"
+    elif len(episode) > 1:
+        episode = f"E{min(episode):02d}-{max(episode):02d}"
+    else:
+        raise Exception("Issue with epsiode numbering")
 
-        fpath = [video_utils_dbkey(title), season+episode]
-        log.info(
-            "Will rip: %s (%s) S%sE%s %s-%s",
-            title.get('title', ''),
-            title.get('year', 'XXXX'),
-            title.get('season', 'XX').zfill(2),
-            title.get('episode', 'XX').zfill(2),
-            title.get('extra', 'extra'),
-            title.get('extraTitle', '') or 'NA',
-        )
+    fpath = [video_utils_dbkey(info), season+episode]
+    log.info(
+        "Will rip: %s (%s) S%sE%s %s-%s",
+        info.get('title', ''),
+        info.get('year', 'XXXX'),
+        info.get('season', 'XX').zfill(2),
+        info.get('episode', 'XX').zfill(2),
+        info.get('extra', 'extra'),
+        info.get('extraTitle', '') or 'NA',
+    )
 
-        yield tid, os.path.join(outdir, '.'.join(fpath)+ext)
+    return os.path.join(outdir, '.'.join(fpath)+ext)
 
 
 def video_utils_outfile(
@@ -331,12 +330,19 @@ def video_utils_outfile(
 
     if not ext.startswith('.'):
         ext = "."+ext
-    if info['isMovie']:
-        func = video_utils_movie
-    elif info['isSeries']:
-        func = video_utils_series
 
-    yield from func(outdir, info, ext, everything, extras)
+    for tid, title in info.get('titles', {}).items():
+
+        if title['isMovie']:
+            func = video_utils_movie
+        elif title['isSeries']:
+            func = video_utils_series
+
+        outfile = func(outdir, title, ext, everything, extras)
+        if outfile is None:
+            continue
+
+        yield tid, outfile
 
 
 def _replace(string: str, repl: str, **kwargs) -> str:

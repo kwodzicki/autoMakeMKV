@@ -15,6 +15,7 @@ import pyudev
 from . import UUID_ROOT, OUTDIR, DBDIR
 from . import paths
 from . import ripper
+from .ui import dialogs
 
 KEY = 'DEVNAME'
 CHANGE = 'DISK_MEDIA_CHANGE'
@@ -204,10 +205,20 @@ class UdevWatchdog(QtCore.QThread):
     def quit(self, *args, **kwargs):
         RUNNING.set()
 
+    def rip_failure(self, device: str):
+
+        dialog = dialogs.RipFailure(device)
+        dialog.exec_()
+
+    def rip_success(self, device: str):
+
+        dialog = dialogs.RipSuccess(device)
+        dialog.exec_()
+
     @QtCore.pyqtSlot(str)
     def handle_disc(self, dev: str):
 
-        self._mounted[dev] = ripper.DiscHandler(
+        obj = ripper.DiscHandler(
             dev,
             self.outdir,
             self.everything,
@@ -217,3 +228,8 @@ class UdevWatchdog(QtCore.QThread):
             self.filegen,
             self.progress_dialog,
         )
+
+        obj.FAILURE.connect(self.rip_failure)
+        obj.SUCCESS.connect(self.rip_success)
+
+        self._mounted[dev] = obj

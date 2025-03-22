@@ -1,6 +1,9 @@
 import logging
 import time
+from datetime import timedelta
 
+import re
+from threading import Lock
 from subprocess import Popen
 
 from PyQt5 import QtWidgets
@@ -17,8 +20,9 @@ class ProgressDialog(QtWidgets.QWidget):
     MKV_ADD_DISC = QtCore.pyqtSignal(str, dict, bool)
     # Arg is dev of disc to remove
     MKV_REMOVE_DISC = QtCore.pyqtSignal(str)
-    # Args are dev of disc to attach process to and the process
-    MKV_NEW_PROCESS = QtCore.pyqtSignal(str, Popen)
+    # Args are dev of disc to attach process to, the Popen object, and the
+    # pipe to read from
+    MKV_NEW_PROCESS = QtCore.pyqtSignal(str, Popen, str)
     # First arg is dev, second is track num
     MKV_CUR_TRACK = QtCore.pyqtSignal(str, str)
     # First arg is dev, second is track num
@@ -72,13 +76,13 @@ class ProgressDialog(QtWidgets.QWidget):
             self.setVisible(False)
         self.adjustSize()
 
-    @QtCore.pyqtSlot(str, Popen)
-    def mkv_new_process(self, dev: str, proc: Popen):
+    @QtCore.pyqtSlot(str, Popen, str)
+    def mkv_new_process(self, dev: str, proc: Popen, pipe: str):
         widget = self.widgets.get(dev, None)
         if widget is None:
             return
         self.log.debug("%s - Setting new parser process", dev)
-        widget.NEW_PROCESS.emit(proc)
+        widget.NEW_PROCESS.emit(proc, pipe)
 
     @QtCore.pyqtSlot(str)
     def mkv_current_disc(self, dev: str):
@@ -111,30 +115,64 @@ class BasicProgressWidget(QtWidgets.QWidget):
     """
 
     CANCEL = QtCore.pyqtSignal(str)  # dev to cancel rip of
-    NEW_PROCESS = QtCore.pyqtSignal(Popen)
+    NEW_PROCESS = QtCore.pyqtSignal(Popen, str)
 
-    def __init__(self, dev: str, proc: Popen | None = None):
+    def __init__(
+        self,
+        dev: str,
+        proc: Popen | None = None,
+        pipe: str | None = None,
+    ):
         super().__init__()
 
         self.log = logging.getLogger(__name__)
 
+        self._track_t = None
+        self._disc_t = None
+        self._track_frac = 0.0
+        self._disc_frac = 0.0
+
+        # Timer thread for running elapsed/remaining
+        self._timer = QtCore.QTimer()
+        self._timer.timeout.connect(self._time_update)
+        self._timer.start(1000)
+
         self.dev = dev
 
         self.track_label = QtWidgets.QLabel('')
+        self.track_time = QtWidgets.QLabel('')
         self.track_prog = QtWidgets.QProgressBar()
 
         self.disc_label = QtWidgets.QLabel('')
+        self.disc_time = QtWidgets.QLabel('')
         self.disc_prog = QtWidgets.QProgressBar()
 
-        layout = QtWidgets.QVBoxLayout()
+        # Set up some track progress label
+        layout = QtWidgets.QHBoxLayout()
         layout.addWidget(self.track_label)
-        layout.addWidget(self.track_prog)
+        layout.addStretch()
+        layout.addWidget(self.track_time)
+        track = QtWidgets.QWidget()
+        track.setLayout(layout)
+
+        # Set up some disc progress label
+        layout = QtWidgets.QHBoxLayout()
         layout.addWidget(self.disc_label)
+        layout.addStretch()
+        layout.addWidget(self.disc_time)
+        disc = QtWidgets.QWidget()
+        disc.setLayout(layout)
+
+        # Set up final layout
+        layout = QtWidgets.QVBoxLayout()
+        layout.addWidget(track)
+        layout.addWidget(self.track_prog)
+        layout.addWidget(disc)
         layout.addWidget(self.disc_prog)
 
         self.setLayout(layout)
 
-        self.thread = ProgressParser(proc)
+        self.thread = ProgressParser(proc, pipe=pipe)
         self.thread.PROGRESS_TITLE.connect(self.label_update)
         self.thread.PROGRESS_VALUE.connect(self.progress_update)
 
@@ -142,22 +180,33 @@ class BasicProgressWidget(QtWidgets.QWidget):
 
         self.NEW_PROCESS.connect(self.new_process)
 
-    @QtCore.pyqtSlot(Popen)
-    def new_process(self, proc: Popen):
+    @QtCore.pyqtSlot(Popen, str)
+    def new_process(self, proc: Popen, pipe: str):
+        """
+        Handler for new disc scan process
+
+        Arguments:
+            proc (Popen): Popen object of makemkvcon scan
+            pipe (str): Not used; just input empty string
+
+        """
 
         self.log.debug(
             "%s - Updating process for parsing progress",
             self.dev,
         )
-        self.thread.proc = proc
+        self.thread.update_proc_pipe(proc=proc, pipe=pipe)
 
     @QtCore.pyqtSlot(str, str)
     def label_update(self, mtype: str, text: str):
 
+        tt = time.monotonic()
         if mtype == 'PRGC':
             self.track_label.setText(text)
+            self._track_t = tt
         elif mtype == 'PRGT':
             self.disc_label.setText(text)
+            self._disc_t = tt
 
     @QtCore.pyqtSlot(int, int, int)
     def progress_update(self, current: int, total: int, maximum: int):
@@ -169,8 +218,71 @@ class BasicProgressWidget(QtWidgets.QWidget):
 
         self.track_prog.setMaximum(maximum)
         self.track_prog.setValue(current)
+        self._track_frac = current / maximum
+
         self.disc_prog.setMaximum(maximum)
         self.disc_prog.setValue(total)
+        self._disc_frac = total / maximum
+
+    def close(self, *args, **kwargs):
+        """Overload to ensure timer thread stopped"""
+
+        self._timer.stop()
+        super().close(*args, **kwargs)
+
+    def _time_update(self):
+        """
+        Timer thread for time-progress updated
+
+        """
+
+        cur_time = time.monotonic()
+        self._time_update_sub(
+            self._track_t,
+            cur_time,
+            self._track_frac,
+            self.track_time,
+        )
+
+        self._time_update_sub(
+            self._disc_t,
+            cur_time,
+            self._disc_frac,
+            self.disc_time,
+        )
+
+    def _time_update_sub(
+        self,
+        ref_time: float | None,
+        cur_time: float,
+        frac: float,
+        label: QtWidgets.QProgressBar,
+    ) -> None:
+        """
+        Sub routine for time label update
+
+        """
+
+        if ref_time is None:
+            return
+
+        elapsed = cur_time - ref_time
+        if elapsed < 5:
+            label.setText("")
+            return
+
+        text = []
+        if elapsed >= 10:
+            remain = timedelta(
+                seconds=round(
+                    (elapsed / frac) - elapsed
+                )
+            )
+            text.append(f"Remaining: {remain}")
+
+        elapsed = timedelta(seconds=round(elapsed))
+        text.append(f"Elapsed: {elapsed}")
+        label.setText(" / ".join(text))
 
 
 class ProgressWidget(QtWidgets.QFrame):
@@ -184,7 +296,7 @@ class ProgressWidget(QtWidgets.QFrame):
     """
 
     CANCEL = QtCore.pyqtSignal(str)  # dev to cancel rip of
-    NEW_PROCESS = QtCore.pyqtSignal(Popen)
+    NEW_PROCESS = QtCore.pyqtSignal(Popen, str)
 
     def __init__(
         self,
@@ -194,6 +306,8 @@ class ProgressWidget(QtWidgets.QFrame):
         proc: Popen | None = None,
     ):
         super().__init__()
+
+        self.log = logging.getLogger(__name__)
 
         self.setFrameStyle(
             QtWidgets.QFrame.StyledPanel | QtWidgets.QFrame.Plain
@@ -217,22 +331,37 @@ class ProgressWidget(QtWidgets.QFrame):
 
         self.progress = BasicProgressWidget(dev, proc=proc)
         self.NEW_PROCESS.connect(
-            self.progress.new_process
+            self.new_process
         )
 
         self.cancel_but = QtWidgets.QPushButton("Cancel Rip")
         self.cancel_but.clicked.connect(self.cancel)
 
-        layout = QtWidgets.QVBoxLayout()
-        layout.addWidget(self.drive)
-        layout.addWidget(self.metadata)
-        layout.addWidget(self.progress)
-        layout.addWidget(self.cancel_but)
+        layout = QtWidgets.QGridLayout()
+        layout.addWidget(self.drive, 0, 0)
+        layout.addWidget(self.metadata, 5, 0)
+        layout.addWidget(self.progress, 10, 0)
+        layout.addWidget(self.cancel_but, 15, 0)
 
         self.setLayout(layout)
 
     def __len__(self):
         return len(self.info)
+
+    @QtCore.pyqtSlot(Popen, str)
+    def new_process(self, proc: Popen, pipe: str):
+        self.log.debug(
+            "%s - Creating new basic widget",
+            self.dev,
+        )
+
+        layout = self.layout()
+        layout.removeWidget(self.progress)
+        self.progress.close()
+
+        self.progress = BasicProgressWidget(self.dev, proc=proc, pipe=pipe)
+
+        layout.addWidget(self.progress, 10, 0)
 
     def cancel(self, *args, **kwargs):
 
@@ -257,8 +386,10 @@ class ProgressWidget(QtWidgets.QFrame):
 
         """
 
-        info = self.info['titles'][title]
-        print(info)
+        info = self.info.get('titles', {}).get(title, None)
+        if info is None:
+            return
+
         self.metadata.update(info)
 
         # Increment number of titles processed and append file size
@@ -276,9 +407,16 @@ class Metadata(QtWidgets.QWidget):
         self.series = BaseLabel('Series')
         self.season = BaseLabel('Season')
         self.episode = BaseLabel('Episode')
+        self.extra = BaseLabel('Extra')
 
+        self._idx = -1
         self._layout = QtWidgets.QGridLayout()
         self.setLayout(self._layout)
+
+    @property
+    def idx(self):
+        self._idx += 1
+        return self._idx
 
     def update(self, info):
 
@@ -288,15 +426,28 @@ class Metadata(QtWidgets.QWidget):
         elif info['isSeries']:
             self.is_series(info)
 
-    def is_movie(self, info):
+        extra_type = info.get('extra', '')
+        if extra_type == '':
+            return
+
+        extra = info.get('extraTitle', '')
+        if extra == '':
+            return
+
+        self.extra.setText(
+            f"{extra_type.title()}: {extra}"
+        )
+        self.extra.addToLayout(self._layout, self.idx)
+
+    def is_movie(self, info: dict):
 
         self.title.setText(info['title'])
         self.year.setText(info['year'])
 
-        self.title.addToLayout(self._layout, 0)
-        self.year.addToLayout(self._layout, 1)
+        self.title.addToLayout(self._layout, self.idx)
+        self.year.addToLayout(self._layout, self.idx)
 
-    def is_series(self, info):
+    def is_series(self, info: dict):
 
         self.series.setText(info['title'])
         self.year.setText(info['year'])
@@ -304,14 +455,14 @@ class Metadata(QtWidgets.QWidget):
         self.season.setText(info['season'])
         self.episode.setText(info['episode'])
 
-        self.series.addToLayout(self._layout, 0)
-        self.year.addToLayout(self._layout, 1)
-        self.title.addToLayout(self._layout, 2)
-        self.season.addToLayout(self._layout, 3)
-        self.episode.addToLayout(self._layout, 4)
+        self.series.addToLayout(self._layout, self.idx)
+        self.year.addToLayout(self._layout, self.idx)
+        self.title.addToLayout(self._layout, self.idx)
+        self.season.addToLayout(self._layout, self.idx)
+        self.episode.addToLayout(self._layout, self.idx)
 
     def clear(self):
-
+        self._idx = -1
         for i in reversed(range(self._layout.count())):
             widget = self._layout.itemAt(i).widget()
             self._layout.removeWidget(widget)
@@ -327,11 +478,27 @@ class ProgressParser(QtCore.QThread):
     PROGRESS_TITLE = QtCore.pyqtSignal(str, str)
     PROGRESS_VALUE = QtCore.pyqtSignal(int, int, int)
 
-    def __init__(self, proc: Popen | None = None, pipe: str = 'stderr'):
+    def __init__(
+        self,
+        proc: Popen | None = None,
+        pipe: str | None = None,
+    ):
         super().__init__()
         self.log = logging.getLogger(__name__)
-        self.proc = proc
-        self.pipe = pipe
+        self.t0 = None
+        self._lock = Lock()
+        self._proc = proc
+        self._pipe = pipe or 'stdout'
+
+    @property
+    def proc(self):
+        with self._lock:
+            return self._proc
+
+    @property
+    def pipe(self):
+        with self._lock:
+            return self._pipe
 
     def run(self):
 
@@ -344,25 +511,57 @@ class ProgressParser(QtCore.QThread):
             if pipe is None:
                 continue
 
+            if self.t0 is None:
+                self.t0 = time.monotonic()
+
             try:
                 line = pipe.readline()
             except Exception:
                 continue
 
-            mtype, *vals = line.split(':')
-            vals = ":".join(vals).split(',')
-
-            if mtype == 'PRGV':
-                self.PROGRESS_VALUE.emit(*map(int, vals))
-                continue
-
-            self.PROGRESS_TITLE.emit(
-                mtype,
-                vals[-1].rstrip().strip('"'),
-            )
+            cli = self.proc.args[0]
+            if cli == 'makemkvcon':
+                self.parse_makemkvcon(line)
+            elif cli == 'mkvmerge':
+                self.parse_mkvmerge(line)
+            else:
+                self.log.error("Parser not implemented for: %s", cli)
 
         self.PROGRESS_VALUE.emit(-1, -1, -1)
         self.log.debug("Progress processor thread dead")
+
+    def update_proc_pipe(self, proc=None, pipe=None):
+        with self._lock:
+            if proc is not None:
+                self._proc = proc
+            if pipe is not None:
+                self._pipe = pipe
+
+    def parse_makemkvcon(self, line):
+        """
+        Parse information from makemkvcon
+
+        """
+
+        mtype, *vals = line.split(':')
+        vals = ":".join(vals).split(',')
+
+        if mtype == 'PRGV':
+            current, total, maximum = map(int, vals)
+            self.PROGRESS_VALUE.emit(current, total, maximum)
+            return
+
+        self.PROGRESS_TITLE.emit(
+            mtype,
+            vals[-1].rstrip().strip('"'),
+        )
+
+    def parse_mkvmerge(self, line):
+        mm = re.search(r'Progress:\s*(\d+)%', line)
+        if not mm:
+            return
+        prog = int(mm.group(1))
+        self.PROGRESS_VALUE.emit(prog, prog, 100)
 
 
 class BaseLabel(QtWidgets.QWidget):

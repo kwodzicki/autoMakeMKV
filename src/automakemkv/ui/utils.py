@@ -158,3 +158,14 @@ def get_vendor_model(path: str) -> tuple[str]:
         model = ''
 
     return vendor.strip(), model.strip()
+
+
+def fancy_time(seconds: float) -> str:
+
+    minutes = int(seconds / 60)
+    seconds = round(seconds % 60)
+
+    hours = int(minutes / 60)
+    minutes = minutes % 60
+
+    return f"{hours:02d}:{minutes:02d}:{seconds:02d}"

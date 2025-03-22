@@ -176,6 +176,10 @@ class MakeMKVThread(QtCore.QThread):
     def dev(self):
         return self._dev
 
+    @dev.setter
+    def dev(self, val):
+        self._dev = val
+
     @property
     def returncode(self):
         """Get returncode from processs"""

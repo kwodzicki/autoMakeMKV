@@ -126,18 +126,46 @@ class BasicProgressWidget(QtWidgets.QWidget):
 
         self.log = logging.getLogger(__name__)
 
+        self._track_t = None
+        self._disc_t = None
+        self._track_frac = 0.0
+        self._disc_frac = 0.0
+
+        self._timer = QtCore.QTimer()
+        self._timer.timeout.connect(self._time_update)
+        self._timer.start(1000)
+
         self.dev = dev
 
         self.track_label = QtWidgets.QLabel('')
+        self.track_time = QtWidgets.QLabel('')
         self.track_prog = QtWidgets.QProgressBar()
 
         self.disc_label = QtWidgets.QLabel('')
+        self.disc_time = QtWidgets.QLabel('')
         self.disc_prog = QtWidgets.QProgressBar()
 
-        layout = QtWidgets.QVBoxLayout()
+        # Set up some track progress label
+        layout = QtWidgets.QHBoxLayout()
         layout.addWidget(self.track_label)
-        layout.addWidget(self.track_prog)
+        layout.addStretch()
+        layout.addWidget(self.track_time)
+        track = QtWidgets.QWidget()
+        track.setLayout(layout)
+
+        # Set up some disc progress label
+        layout = QtWidgets.QHBoxLayout()
         layout.addWidget(self.disc_label)
+        layout.addStretch()
+        layout.addWidget(self.disc_time)
+        disc = QtWidgets.QWidget()
+        disc.setLayout(layout)
+
+        # Set up final layout
+        layout = QtWidgets.QVBoxLayout()
+        layout.addWidget(track)
+        layout.addWidget(self.track_prog)
+        layout.addWidget(disc)
         layout.addWidget(self.disc_prog)
 
         self.setLayout(layout)
@@ -170,10 +198,13 @@ class BasicProgressWidget(QtWidgets.QWidget):
     @QtCore.pyqtSlot(str, str)
     def label_update(self, mtype: str, text: str):
 
+        tt = time.monotonic()
         if mtype == 'PRGC':
             self.track_label.setText(text)
+            self._track_t = tt
         elif mtype == 'PRGT':
             self.disc_label.setText(text)
+            self._disc_t = tt
 
     @QtCore.pyqtSlot(int, int, int)
     def progress_update(self, current: int, total: int, maximum: int):
@@ -185,8 +216,60 @@ class BasicProgressWidget(QtWidgets.QWidget):
 
         self.track_prog.setMaximum(maximum)
         self.track_prog.setValue(current)
+        self._track_frac = current / maximum
+
         self.disc_prog.setMaximum(maximum)
         self.disc_prog.setValue(total)
+        self._disc_frac = total / maximum
+
+    def _time_update(self):
+        """
+        Timer thread for time-progress updated
+
+        """
+
+        cur_time = time.monotonic()
+        self._time_update_sub(
+            self._track_t,
+            cur_time,
+            self._track_frac,
+            self.track_time,
+        )
+
+        self._time_update_sub(
+            self._disc_t,
+            cur_time,
+            self._disc_frac,
+            self.disc_time,
+        )
+
+    def _time_update_sub(
+        self,
+        ref_time: float | None,
+        cur_time: float,
+        frac: float,
+        label: QtWidgets.QProgressBar,
+    ) -> None:
+        """
+        Sub routine for time label update
+
+        """
+
+        if ref_time is None:
+            return
+
+        elapsed = cur_time - ref_time
+        if elapsed < 5:
+            label.setText("")
+            return
+
+        text = "Elapsed: " + utils.fancy_time(elapsed)
+        if elapsed > 10:
+            remain = (elapsed / frac) - elapsed
+            remain = utils.fancy_time(remain)
+            text = f"Remaining: {remain} / {text}"
+
+        label.setText(text)
 
 
 class ProgressWidget(QtWidgets.QFrame):

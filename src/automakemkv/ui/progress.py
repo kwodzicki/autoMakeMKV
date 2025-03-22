@@ -1,5 +1,6 @@
 import logging
 import time
+from datetime import timedelta
 
 import re
 from threading import Lock
@@ -131,6 +132,7 @@ class BasicProgressWidget(QtWidgets.QWidget):
         self._track_frac = 0.0
         self._disc_frac = 0.0
 
+        # Timer thread for running elapsed/remaining
         self._timer = QtCore.QTimer()
         self._timer.timeout.connect(self._time_update)
         self._timer.start(1000)
@@ -222,6 +224,12 @@ class BasicProgressWidget(QtWidgets.QWidget):
         self.disc_prog.setValue(total)
         self._disc_frac = total / maximum
 
+    def close(self, *args, **kwargs):
+        """Overload to ensure timer thread stopped"""
+
+        self._timer.stop()
+        super().close(*args, **kwargs)
+
     def _time_update(self):
         """
         Timer thread for time-progress updated
@@ -263,13 +271,18 @@ class BasicProgressWidget(QtWidgets.QWidget):
             label.setText("")
             return
 
-        text = "Elapsed: " + utils.fancy_time(elapsed)
-        if elapsed > 10:
-            remain = (elapsed / frac) - elapsed
-            remain = utils.fancy_time(remain)
-            text = f"Remaining: {remain} / {text}"
+        text = []
+        if elapsed >= 10:
+            remain = timedelta(
+                seconds=round(
+                    (elapsed / frac) - elapsed
+                )
+            )
+            text.append(f"Remaining: {remain}")
 
-        label.setText(text)
+        elapsed = timedelta(seconds=round(elapsed))
+        text.append(f"Elapsed: {elapsed}")
+        label.setText(" / ".join(text))
 
 
 class ProgressWidget(QtWidgets.QFrame):

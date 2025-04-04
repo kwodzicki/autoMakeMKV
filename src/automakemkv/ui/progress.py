@@ -272,7 +272,7 @@ class BasicProgressWidget(QtWidgets.QWidget):
             return
 
         text = []
-        if elapsed >= 10:
+        if elapsed >= 10 and frac > 0:
             remain = timedelta(
                 seconds=round(
                     (elapsed / frac) - elapsed

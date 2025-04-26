@@ -1,5 +1,6 @@
 import logging
 import os
+import shutil
 import re
 import json
 import gzip
@@ -7,6 +8,8 @@ import gzip
 from .. import OUTDIR, DBDIR, SETTINGS_FILE
 
 EXT = '.json'
+INFO_EXT = '.info.gz'
+
 TRACKSIZE_AP = 11  # Number used for track size in TINFO from MakeMKV
 TRACKSIZE_REG = re.compile(
     rf"TINFO:(\d+),{TRACKSIZE_AP},\d+,\"(\d+)\"",
@@ -58,6 +61,7 @@ def save_settings(settings: dict) -> None:
 
 def load_metadata(
     discid: str | None = None,
+    hashid: str | None = None,
     fpath: str | None = None,
     dbdir: str | None = None,
 ) -> tuple:
@@ -70,7 +74,7 @@ def load_metadata(
     dbdir = dbdir or DBDIR
 
     if fpath is None:
-        fpath = file_from_discid(discid, dbdir)
+        fpath = db_migrate(discid, hashid, dbdir)
 
     log.debug("Path to database file : %s", fpath)
     if not os.path.isfile(fpath):
@@ -79,7 +83,7 @@ def load_metadata(
     with open(fpath, 'r') as fid:
         info = json.load(fid)
 
-    infopath = os.path.splitext(fpath)[0]+'.info.gz'
+    infopath = os.path.splitext(fpath)[0] + INFO_EXT
     with gzip.open(infopath, 'rt') as fid:
         data = fid.read()
 
@@ -90,9 +94,36 @@ def load_metadata(
     return info, sizes
 
 
+def db_migrate(discid: str | None, hashid: str, dbdir: str | None):
+
+    log = logging.getLogger(__name__)
+    if discid is None:
+        log.debug("No 'discid', using new hash")
+        return file_from_id(hashid, dbdir)
+
+    old_path = file_from_id(discid, dbdir)
+    new_path = file_from_id(hashid, dbdir)
+
+    if not os.path.isfile(old_path):
+        log.debug("No old metadata to migrate, using new hash")
+        return new_path
+
+    if os.path.isfile(new_path):
+        log.debug("New hash exists, using it")
+        return new_path
+
+    log.debug("Migrating data: %s --> %s", old_path, new_path)
+    old_infopath = os.path.splitext(old_path)[0] + INFO_EXT
+    new_infopath = os.path.splitext(new_path)[0] + INFO_EXT
+    shutil.copy(old_path, new_path)
+    shutil.copy(old_infopath, new_infopath)
+
+    return new_path
+
+
 def save_metadata(
     info: dict,
-    discid: str,
+    hashid: str,
     fpath: str | None = None,
     replace: bool = False,
     dbdir: str | None = None,
@@ -104,26 +135,26 @@ def save_metadata(
         info (dict) : Information from GUI about what tracks/titles to rip
 
     Keyword argumnets:
-        discid (str) : Unique disc ID
+        hashid (str) : Unique disc ID
 
     """
 
     dbdir = dbdir or DBDIR
 
     if fpath is None:
-        fpath = os.path.join(dbdir, f"{discid}{EXT}")
+        fpath = file_from_id(hashid, dbdir)
 
     if os.path.isfile(fpath) and not replace:
         return False
 
-    info['discID'] = discid
+    info['hashID'] = hashid
     with open(fpath, 'w') as fid:
         json.dump(info, fid, indent=4)
 
     return True
 
 
-def file_from_discid(discid: str, dbdir: str | None = None):
+def file_from_id(discid: str, dbdir: str | None = None):
 
     return os.path.join(
         dbdir or DBDIR,

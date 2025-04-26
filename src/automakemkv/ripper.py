@@ -11,6 +11,7 @@ import subprocess
 from PyQt5 import QtCore
 
 from . import utils
+from . import disc_hash
 from . import makemkv
 from .ui import metadata
 
@@ -70,8 +71,12 @@ class DiscHandler(QtCore.QObject):
         super().__init__()
         self.log = logging.getLogger(__name__)
 
+        mnt = utils.dev_to_mount(dev)
+
         self.dev = dev
         self.discid = utils.get_discid(dev, root)
+        self.hashid = disc_hash.get_hash(mnt)
+
         self.outdir = outdir
         self.everything = everything
         self.extras = extras
@@ -135,13 +140,17 @@ class DiscHandler(QtCore.QObject):
         if dev != self.dev:
             return
 
-        if self.discid is None:
-            self.log.info("%s - No UUID found for disc, ignoring", dev)
+        if self.discid is None and self.hashid is None:
+            self.log.info("%s - No UUID found or hash for disc, ignoring", dev)
             return
 
         # Get title informaiton for tracks to rip
         self.log.info("%s - UUID of disc: %s", dev, self.discid)
-        info, sizes = metadata.utils.load_metadata(discid=self.discid)
+        self.log.info("%s - Hash of disc: %s", dev, self.hashid)
+        info, sizes = metadata.utils.load_metadata(
+            discid=self.discid,
+            hashid=self.hashid,
+        )
 
         # Open dics metadata GUI and register "callback" for when closes
         if info is None:
@@ -163,7 +172,7 @@ class DiscHandler(QtCore.QObject):
         # Open dics metadata GUI and register "callback" for when closes
         self.metadata = metadata.DiscMetadataEditor(
             dev,
-            self.discid,
+            self.hashid,
             self.dbdir,
             load_existing=load_existing,
         )

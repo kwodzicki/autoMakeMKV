@@ -4,6 +4,7 @@ from logging.handlers import RotatingFileHandler
 import os
 
 UUID_ROOT = "/dev/disk/by-uuid"
+LABEL_ROOT = "/dev/disk/by-label"
 
 NAME = 'autoMakeMKV'
 

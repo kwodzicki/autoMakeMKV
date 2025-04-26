@@ -25,7 +25,7 @@ class DiscMetadataEditor(dialogs.MyQDialog):
     def __init__(
         self,
         dev: str,
-        discid: str,
+        hashid: str,
         dbdir: str,
         *args,
         load_existing: bool = False,
@@ -41,7 +41,7 @@ class DiscMetadataEditor(dialogs.MyQDialog):
         self.sizes = None
 
         self.dev = dev
-        self.discid = discid
+        self.hashid = hashid
         self.dbdir = dbdir
         self.vendor, self.model = utils.get_vendor_model(dev)
         self.setWindowTitle()
@@ -92,7 +92,7 @@ class DiscMetadataEditor(dialogs.MyQDialog):
 
         self.loadDisc = makemkv.MakeMKVInfo(
             dev,
-            discid,
+            hashid,
             dbdir=self.dbdir,
         )
         self.loadDisc.FAILURE.connect(self.load_failed)
@@ -101,10 +101,10 @@ class DiscMetadataEditor(dialogs.MyQDialog):
 
         if load_existing:
             self.log.info("Loading existing information")
-            path = utils.file_from_discid(self.discid, dbdir=self.dbdir)
+            path = utils.file_from_id(self.hashid, dbdir=self.dbdir)
             self.loadDisc.loadFile(json=path)
             self.buildTitleTree(
-                *utils.load_metadata(discid=self.discid, dbdir=self.dbdir)
+                *utils.load_metadata(hashid=self.hashid, dbdir=self.dbdir)
             )
         else:
             self.log.info("Loading new disc")
@@ -148,7 +148,7 @@ class DiscMetadataEditor(dialogs.MyQDialog):
 
     def setWindowTitle(self):
 
-        title = f"{self.dev} [{self.discid}]"
+        title = f"{self.dev} [{self.hashid}]"
         if self.vendor and self.model:
             title = f"{self.vendor} {self.model}: {title}"
         if self.discLabel:
@@ -238,7 +238,7 @@ class DiscMetadataEditor(dialogs.MyQDialog):
         if res == message.Yes:
             utils.save_metadata(
                 info,
-                self.discid,
+                self.hashid,
                 dbdir=self.dbdir,
                 replace=True,
             )
@@ -304,7 +304,7 @@ class DiscMetadataEditor(dialogs.MyQDialog):
         titles = self.loadDisc.titles
         infoTitles = {}
         if info is not None:
-            self.discid = info['discID']
+            self.hashid = info.get('hashID', None)
             self.discMetadata.setInfo(info)
             infoTitles = info['titles']
 

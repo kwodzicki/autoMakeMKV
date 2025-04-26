@@ -253,6 +253,8 @@ class Ripper(QtCore.QThread):
         self.log = logging.getLogger(__name__)
 
         self._dead = False
+        self.mkv_thread = None
+        self.mkv_thread_title = None
         self.dev = dev
         self.info = info
         self.sizes = sizes
@@ -546,7 +548,9 @@ class Ripper(QtCore.QThread):
             )
             if title_src is None:
                 self.log.error(
-                    "Failed to find playlist name for title '%s', skipping.",
+                    "%s - Failed to find playlist name for title '%s', "
+                    "skipping.",
+                    self.dev,
                     title,
                 )
                 continue
@@ -558,7 +562,8 @@ class Ripper(QtCore.QThread):
                 title_src = os.path.join(src, *STREAM_DIR, title_src)
             else:
                 self.log.warning(
-                    "File not currently supported: %s",
+                    "%s - File not currently supported: %s",
+                    self.dev,
                     title_src,
                 )
                 continue
@@ -603,7 +608,7 @@ class Ripper(QtCore.QThread):
                 self.progress.MKV_CUR_TRACK.emit(self.dev, title)
 
             # Initialize MakeMKV process to extract title from ISO
-            self.mkv_thread = makemkv.MakeMKVRip(
+            self.mkv_thread_title = makemkv.MakeMKVRip(
                 'mkv',
                 title=title,
                 iso=src,
@@ -612,18 +617,18 @@ class Ripper(QtCore.QThread):
 
             # Start thread, wait for it to start, update progress if set, then
             # wait for extraction to finish
-            self.mkv_thread.start()
-            self.mkv_thread.started.wait()
+            self.mkv_thread_title.start()
+            self.mkv_thread_title.started.wait()
             if self.progress is not None:
                 self.progress.MKV_NEW_PROCESS.emit(
                     self.dev,
-                    self.mkv_thread.proc,
-                    self.mkv_thread.pipe,
+                    self.mkv_thread_title.proc,
+                    self.mkv_thread_title.pipe,
                 )
-            self.mkv_thread.wait()
+            self.mkv_thread_title.wait()
 
             # If there was an error during extration
-            if self.mkv_thread.returncode != 0:
+            if self.mkv_thread_title.returncode != 0:
                 self.log.warning(
                     "%s - Failed to extract title %s from backup %s",
                     self.dev,

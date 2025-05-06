@@ -6,8 +6,7 @@ Compute disc has based on contents
 import logging
 import os
 import sys
-# import pickle
-from hashlib import sha256
+import hashlib
 
 HOME = os.path.expanduser('~')
 
@@ -20,77 +19,42 @@ def get_hash(root: str | None) -> str | None:
         log.error("No mount point input!")
         return
 
-    items = os.listdir(root)
+    bluray_dir = os.path.join(root, 'BDMV', 'STREAM')
+    dvd_dir = os.path.join(root, 'VIDEO_TS')
 
-    if 'BDMV' in items:
-        log.debug('is bluray')
-        return bluray_hash(root)
+    if os.path.isdir(bluray_dir):
+        log.debug('%s - is bluray', root)
+        path = bluray_dir
+        ext = '.m2ts'
+    elif os.path.isdir(dvd_dir):
+        log.debug('%s - is dvd', root)
+        path = dvd_dir
+        ext = None
+    else:
+        log.error("%s - Could not determine bluray or dvd", root)
+        return
 
-    if 'VIDEO_TS' in items or 'AUDIO_TS' in items:
-        log.debug('is dvd')
-        return dvd_hash(root)
+    paths = [
+        os.path.join(path, item)
+        for item in os.listdir(path)
+        if isinstance(ext, str) and item.endswith(ext)
+    ]
 
-    log.warning("Could not determine disc type!")
-    return
+    content_hash = hashlib.md5()
+    for path in sorted(paths):
+        finfo = os.stat(path)
+        ss = finfo.st_size.to_bytes(8, byteorder=sys.byteorder, signed=True)
+        content_hash.update(ss)
 
-
-def dvd_hash(root: str) -> str:
-    """
-    Generate hash for DVD
-
-    Get tuple of path to each file in VIDEO_TS and AUDIO_TS directories
-    along with the size of each file to create hash for disc
-
-    """
-
-    info = []
-
-    for subdir in ('VIDEO_TS', 'AUDIO_TS'):
-        subdir = os.path.join(root, subdir)
-        if not os.path.isdir(subdir):
-            continue
-
-        for item in os.listdir(subdir):
-            path = os.path.join(subdir, item)
-            if not os.path.isfile(path):
-                continue
-
-            fsize = os.stat(path).st_size
-            path = os.path.normpath(path).replace(root, '')
-            if path.startswith(os.sep):
-                path = path[1:]
-            path = ''.join(
-                path.split(os.sep)
-            )
-            info.append(
-                (path, fsize),
-            )
-    if len(info) == 0:
-        raise Exception("No files found, could not create hash!")
-
-    info = sorted(info, key=lambda x: x[0])
-
-    return (
-        sha256(
-            str(info).encode()
+    try:
+        return content_hash.hexdigest().upper()
+    except Exception as err:
+        log.exception(
+            'Failed to create disc hash for "%s": %s',
+            path,
+            err,
         )
-        .hexdigest()
-    )
-
-
-def bluray_hash(root: str) -> str:
-    """
-    Generate has from index.bdmv
-
-    There should(?) alwasy be an index.bdmv file in the BDMV directory,
-    so just hash the contents of that to get the disc id
-
-    """
-
-    mcmf = os.path.join(root, 'BDMV', 'index.bdmv')
-    with open(mcmf, mode='rb') as iid:
-        data = iid.read()
-    return sha256(data).hexdigest()
+        return None
 
 
 if __name__ == "__main__":

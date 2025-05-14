@@ -29,7 +29,7 @@ def get_hash(root: str | None) -> str | None:
     elif os.path.isdir(dvd_dir):
         log.debug('%s - is dvd', root)
         path = dvd_dir
-        ext = None
+        ext = ''
     else:
         log.error("%s - Could not determine bluray or dvd", root)
         return
@@ -37,7 +37,7 @@ def get_hash(root: str | None) -> str | None:
     paths = [
         os.path.join(path, item)
         for item in os.listdir(path)
-        if isinstance(ext, str) and item.endswith(ext)
+        if item.endswith(ext)
     ]
 
     content_hash = hashlib.md5()

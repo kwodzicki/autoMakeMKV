@@ -4,8 +4,8 @@ Utilities for ripping titles
 """
 
 import logging
-from collections.abc import Callable
 import signal
+from functools import partial
 from threading import Event
 
 from PyQt5 import QtCore
@@ -52,8 +52,8 @@ class UdevWatchdog(QtCore.QThread):
         outdir: str = OUTDIR,
         everything: bool = False,
         extras: bool = False,
+        convention: str = 'video_utils',
         root: str = UUID_ROOT,
-        filegen: Callable = paths.outfile,
         **kwargs,
     ):
         """
@@ -71,13 +71,6 @@ class UdevWatchdog(QtCore.QThread):
             root (str) : Location of the 'by-uuid' directory
                 where discs are mounted. This is used to
                 get the unique ID of the disc.
-            filegen (func) : Function to use to generate
-                output file names based on information
-                from the database. This function must
-                accept (outdir, info, extras=bool), where info is
-                a dictionary of data loaded from the
-                disc database, and extras specifies if
-                extras should be ripped.
 
         """
 
@@ -93,8 +86,9 @@ class UdevWatchdog(QtCore.QThread):
         self.outdir = outdir
         self.everything = everything
         self.extras = extras
+        self.convention = convention
         self.root = root
-        self.filegen = filegen
+        self.filegen = partial(paths.outfile, convention=self.convention)
         self.progress_dialog = progress_dialog
 
         self._mounting = {}
@@ -123,6 +117,8 @@ class UdevWatchdog(QtCore.QThread):
         self.outdir = kwargs.get('outdir', self.outdir)
         self.everything = kwargs.get('everything', self.everything)
         self.extras = kwargs.get('extras', self.extras)
+        self.convention = kwargs.get('convention', self.convention)
+        self.filegen = partial(paths.outfile, convention=self.convention)
 
     def get_settings(self):
 
@@ -131,6 +127,7 @@ class UdevWatchdog(QtCore.QThread):
             'outdir': self.outdir,
             'everything': self.everything,
             'extras': self.extras,
+            'convention': self.convention,
         }
 
     def run(self):

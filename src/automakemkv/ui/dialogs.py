@@ -81,25 +81,14 @@ class RipSuccess(QtWidgets.QDialog):
         self.setLayout(self.layout)
 
 
-class SettingsWidget(QtWidgets.QDialog):
+class SettingsDialog(QtWidgets.QDialog):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
-        self.dbdir = widgets.PathSelector('Database Location:')
-        self.outdir = widgets.PathSelector('Output Location:')
+        layout = QtWidgets.QVBoxLayout()
 
-        radio_layout = QtWidgets.QVBoxLayout()
-        self.features = QtWidgets.QRadioButton("Only Features")
-        self.extras = QtWidgets.QRadioButton("Only Extras")
-        self.everything = QtWidgets.QRadioButton("All Titles")
-        radio_layout.addWidget(self.features)
-        radio_layout.addWidget(self.extras)
-        radio_layout.addWidget(self.everything)
-        radio_widget = QtWidgets.QWidget()
-        radio_widget.setLayout(radio_layout)
-
-        self.set_settings()
+        self.widget = SettingsWidget()
 
         buttons = (
             QtWidgets.QDialogButtonBox.Save
@@ -109,16 +98,60 @@ class SettingsWidget(QtWidgets.QDialog):
         button_box.accepted.connect(self.accept)
         button_box.rejected.connect(self.reject)
 
+        layout.addWidget(self.widget)
+        layout.addWidget(button_box)
+
+        self.setLayout(layout)
+
+        self.set_settings()
+
+    def set_settings(self):
+        self.widget.set_settings()
+
+    def get_settings(self):
+        return self.widget.get_settings()
+
+
+class SettingsWidget(QtWidgets.QWidget):
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        self.dbdir = widgets.PathSelector('Database Location:')
+        self.outdir = widgets.PathSelector('Output Location:')
+
+        self.convention_label = QtWidgets.QLabel('Output naming convention')
+        self.convention = QtWidgets.QComboBox()
+        self.convention.addItems(
+            ['video_utils', 'plex'],
+        )
+
+        radio_layout = QtWidgets.QVBoxLayout()
+        self.features = QtWidgets.QRadioButton("Only Features")
+        self.extras = QtWidgets.QRadioButton("Only Extras")
+        self.everything = QtWidgets.QRadioButton("All Titles")
+        radio_layout.addWidget(
+            QtWidgets.QLabel('Titles to Extract')
+        )
+        radio_layout.addWidget(self.features)
+        radio_layout.addWidget(self.extras)
+        radio_layout.addWidget(self.everything)
+        radio_widget = QtWidgets.QWidget()
+        radio_widget.setLayout(radio_layout)
+
         layout = QtWidgets.QVBoxLayout()
         layout.addWidget(self.dbdir)
         layout.addWidget(self.outdir)
+        layout.addWidget(self.convention_label)
+        layout.addWidget(self.convention)
         layout.addWidget(radio_widget)
-        layout.addWidget(button_box)
         self.setLayout(layout)
 
-    def set_settings(self):
+    def set_settings(self, settings: dict | None = None):
 
-        settings = utils.load_settings()
+        if settings is None:
+            settings = utils.load_settings()
+
         self.features.setChecked(True)
         if 'dbdir' in settings:
             self.dbdir.setText(settings['dbdir'])
@@ -128,16 +161,23 @@ class SettingsWidget(QtWidgets.QDialog):
             self.everything.setChecked(settings['everything'])
         if 'extras' in settings:
             self.extras.setChecked(settings['extras'])
+        if 'convention' in settings:
+            idx = self.convention.findText(settings['convention'])
+            if idx != -1:
+                self.convention.setCurrentIndex(idx)
 
-    def get_settings(self):
+    def get_settings(self, save: bool = True):
 
         settings = {
             'dbdir': self.dbdir.getText(),
             'outdir': self.outdir.getText(),
             'extras': self.extras.isChecked(),
             'everything': self.everything.isChecked(),
+            'convention': self.convention.currentText(),
         }
-        utils.save_settings(settings)
+        if save:
+            utils.save_settings(settings)
+
         return settings
 
 

@@ -24,6 +24,13 @@ from . import DBDIR
 from .mkv_lookup import AP
 
 DEVICE_MSG = 'DRV:'
+SANITIZE = (
+    DEVICE_MSG,
+    'MSG:1004',
+    'MSG:2003',
+    'MSG:3338',
+)
+
 SPLIT = re.compile(r'(".*?"|[^,]+)')
 DEFAULT_KWARGS = {
     'robot': True,
@@ -408,7 +415,9 @@ class MakeMKVInfo(MakeMKVThread):
         # output to file
         with gzip.open(self.info_path, 'wt') as fid:
             for line in iter(self.stdout.readline, ''):
-                fid.write(line)
+                fid.write(
+                    sanitize(line)
+                )
                 self.parse_line(line)
                 self.check_result(line)
         self.proc.wait()
@@ -464,6 +473,47 @@ class MakeMKVInfo(MakeMKVThread):
                 tt[stream] = {}
             if sid in AP:
                 tt[stream][AP[sid]] = val.strip('"')
+
+
+def sanitize(line: str) -> str:
+    """
+    Mask out sensitive information
+
+    Masks out sensitive info in DRV messages and MSG 1004, 2003, 3338
+    from MakeMKV.
+
+    Issue #30 from TheDiscDb
+
+    Arguments:
+        line (str): Line from MakeMKV logs
+
+    Returns:
+        str: Sanititzed line from MakeMKV logs
+
+    """
+
+    if line.startswith(SANITIZE):
+        return re.sub('"[^"]*"', '"***"', line)
+
+    return line
+
+
+def sanitize_database_file(path: str):
+    """
+    path (str): Path to database file to sanitize
+
+    """
+
+    # Read in all the data
+    with gzip.open(path, mode='rt') as iid:
+        lines = iid.readlines()
+
+    # Write out sanitized data
+    with gzip.open(path, mode='wt') as oid:
+        for line in lines:
+            oid.write(
+                sanitize(line)
+            )
 
 
 def _dev_to_disc(timeout: float | int = 60.0) -> dict:

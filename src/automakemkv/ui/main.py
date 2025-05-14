@@ -74,7 +74,7 @@ class SystemTray(QtWidgets.QSystemTrayIcon):
     def settings_widget(self, *args, **kwargs):
 
         self.__log.debug('opening settings')
-        settings_widget = dialogs.SettingsWidget()
+        settings_widget = dialogs.SettingsDialog()
         if settings_widget.exec_():
             self.ripper.set_settings(
                 **settings_widget.get_settings(),

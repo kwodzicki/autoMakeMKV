@@ -32,6 +32,7 @@ def load_settings() -> dict:
             'everything': False,
             'extras': False,
             'show_status': True,
+            'convention': 'plex',
         }
         save_settings(settings)
         return settings

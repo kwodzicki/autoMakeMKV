@@ -108,11 +108,14 @@ class DiscHandler(QtCore.QObject):
         # Else, return status of the ripper
         return self.ripper.isRunning()
 
-    def terminate(self):
+    def terminate(self, dev: str):
         """
         Kill/close all objects
 
         """
+
+        if dev != self.dev:
+            return
 
         if self.options is not None:
             self.options.close()

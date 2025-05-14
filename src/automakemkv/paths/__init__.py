@@ -9,6 +9,8 @@ program suite.
 
 """
 
+import logging
+
 from . import video_utils, plex
 
 
@@ -18,7 +20,7 @@ def outfile(
     ext: str = '.mkv',
     everything: bool = False,
     extras: bool = False,
-    style: str | None = None,
+    convention: str | None = None,
     **kwargs,
 ) -> tuple:
     """
@@ -41,7 +43,7 @@ def outfile(
             episodes AND the extra features. Default is to just
             rip the main feature(s)/episodes
         extras (bool) : If set, rip ONLY the extra features.
-        style (str): Set to either 'video_utils' or 'plex' for file naming
+        convention (str): Set to either 'video_utils' or 'plex' for file naming
             convention.
             If None, then default to 'video_utils'
 
@@ -50,17 +52,21 @@ def outfile(
 
     """
 
-    style = style or 'video_utils'
-    if style == 'video_utils':
+    log = logging.getLogger(__name__)
+
+    convention = convention or 'video_utils'
+    if convention == 'video_utils':
         movie = video_utils.movie
         series = video_utils.series
-    elif style == 'plex':
+    elif convention == 'plex':
         movie = plex.movie
         series = plex.series
     else:
         raise ValueError(
-            "The 'style' keyword can be one of 'video_utils' or 'plex'"
+            "The 'convention' keyword can be one of 'video_utils' or 'plex'"
         )
+
+    log.debug('Using file convention: %s', convention)
 
     if not ext.startswith('.'):
         ext = "."+ext

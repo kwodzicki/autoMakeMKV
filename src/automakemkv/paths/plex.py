@@ -54,10 +54,11 @@ def movie(
     """
 
     movie_lib_name = movie_lib_name or 'Movies'
+    base = '{title} ({year}) {{tmdb-{tmdb}}}'.format(**info)
     fpath = os.path.join(
         outdir,
         movie_lib_name,
-        '{title} ({year}) {{tmdb-{tmdb}}}'.format(**info),
+        base,
     )
 
     if info.get('extraTitle', '') != '':
@@ -66,17 +67,14 @@ def movie(
 
         if info.get('extra', '') in EXTRA_LOOKUP:
             return os.path.join(
-                outdir,
                 fpath,
                 EXTRA_LOOKUP[info['extra']],
                 "{extraTitle}{ext}".format(ext=ext, **info),
             )
 
-        base = "{fpath} {edition-{{extraTitle}}}".format(fpath=fpath, **info)
+        base = "{base} {edition-{{extraTitle}}}".format(base=base, **info)
     elif extras and not everything:
         return None
-    else:
-        base = fpath
 
     return os.path.join(fpath, f"{base}{ext}")
 

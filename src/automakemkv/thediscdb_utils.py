@@ -88,7 +88,7 @@ def convert_metadata(
         'isSeries': metadata.get('Type', '') == 'Series',
         'media_type': media_type,
         'upc': release.get('Upc', ''),
-        'discID': titles.get('ContentHash', ''),
+        'thediscdb': titles.get('ContentHash', ''),
     }
 
     # Iterate over all titles, converting to autoMakeMKV format

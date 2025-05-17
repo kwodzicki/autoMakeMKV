@@ -4,6 +4,7 @@ from PyQt5 import QtWidgets
 from PyQt5 import QtCore
 
 from .. import NAME
+from ..path_utils import CONVENTIONS
 from . import utils
 from . import widgets
 
@@ -122,9 +123,7 @@ class SettingsWidget(QtWidgets.QWidget):
 
         self.convention_label = QtWidgets.QLabel('Output naming convention')
         self.convention = QtWidgets.QComboBox()
-        self.convention.addItems(
-            ['video_utils', 'plex'],
-        )
+        self.convention.addItems(CONVENTIONS)
 
         radio_layout = QtWidgets.QVBoxLayout()
         self.features = QtWidgets.QRadioButton("Only Features")

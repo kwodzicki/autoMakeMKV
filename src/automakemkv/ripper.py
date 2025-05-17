@@ -4,7 +4,6 @@ Utilities for ripping titles
 """
 
 import logging
-from collections.abc import Callable
 import os
 import shutil
 import subprocess
@@ -13,6 +12,7 @@ from PyQt5 import QtCore
 from . import utils
 from . import disc_hash
 from . import makemkv
+from . import path_utils
 from .ui import metadata
 
 SIZE_POLL = 10
@@ -40,7 +40,7 @@ class DiscHandler(QtCore.QObject):
         extras: bool,
         dbdir: str,
         root: str,
-        filegen: Callable,
+        convention: str,
         progress_dialog,
         **kwargs,
     ):
@@ -58,13 +58,7 @@ class DiscHandler(QtCore.QObject):
             root (str) : Location of the 'by-uuid' directory
                 where discs are mounted. This is used to
                 get the unique ID of the disc.
-            filegen (func) : Function to use to generate
-                output file names based on information
-                from the database. This function must
-                accept (outdir, info, extras=bool), where info is
-                a dictionary of data loaded from the
-                disc database, and extras specifies if
-                extras should be ripped.
+            convention (str) : Output naming convention to use for
 
         """
 
@@ -82,7 +76,7 @@ class DiscHandler(QtCore.QObject):
         self.extras = extras
         self.dbdir = dbdir
         self.root = root
-        self.filegen = filegen
+        self.convention = convention
         self.progress_dialog = progress_dialog
 
         self.options = None
@@ -233,7 +227,7 @@ class DiscHandler(QtCore.QObject):
                 self.outdir,
                 self.everything,
                 self.extras,
-                self.filegen,
+                self.convention,
                 self.progress_dialog,
             )
             self.ripper.FAILURE.connect(self.FAILURE.emit)
@@ -257,7 +251,7 @@ class Ripper(QtCore.QThread):
         outdir: str,
         everything: bool,
         extras: bool,
-        filegen: Callable,
+        convention: str,
         progress,
     ):
 
@@ -273,7 +267,7 @@ class Ripper(QtCore.QThread):
         self.outdir = outdir
         self.everything = everything
         self.extras = extras
-        self.filegen = filegen
+        self.convention = convention
         self.progress = progress
         self.tmpdir = os.path.join(
             outdir,
@@ -294,11 +288,12 @@ class Ripper(QtCore.QThread):
             return
 
         paths = dict(
-            self.filegen(
+            path_utils.outfile(
                 self.outdir,
                 self.info,
                 everything=self.everything,
                 extras=self.extras,
+                convention=self.convention,
             )
         )
 

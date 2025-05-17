@@ -4,7 +4,7 @@ import time
 
 from . import UUID_ROOT, LABEL_ROOT, HOMEDIR
 
-TIMEOUT = 5.0  # Timeout to wait for disc to mount
+TIMEOUT = 20.0  # Timeout to wait for disc to mount
 
 
 def get_discid(discDev: str, root: str = UUID_ROOT, **kwargs) -> str | None:
@@ -39,22 +39,27 @@ def get_discid(discDev: str, root: str = UUID_ROOT, **kwargs) -> str | None:
 
 def dev_to_mount(dev: str, root: str = LABEL_ROOT, **kwargs) -> str | None:
 
-    for item in os.listdir(root):
-        path = os.path.realpath(os.path.join(root, item))
-        if path != dev:
-            continue
+    uname = os.getlogin()
 
-        path = os.path.join('/media', os.getlogin(), item)
-        t0 = time.monotonic()
-        t1 = t0 + TIMEOUT
-        while t0 < t1:
+    t0 = time.monotonic()
+    t1 = t0 + TIMEOUT
+
+    while t0 < t1:
+        for item in os.listdir(root):
+            path = os.path.realpath(os.path.join(root, item))
+            if path != dev:
+                continue
+
+            path = os.path.join('/media', uname, item)
             try:
                 _ = os.listdir(path)
             except Exception:
-                time.sleep(0.5)
-                t0 = time.monotonic()
-            else:
-                return path
+                break
+
+            return path
+
+        time.sleep(3.0)
+        t0 = time.monotonic()
 
     return None
 

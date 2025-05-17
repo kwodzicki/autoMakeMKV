@@ -13,6 +13,11 @@ import logging
 
 from . import video_utils, plex
 
+CONVENTIONS = [
+    'video_utils',
+    'plex',
+]
+
 
 def outfile(
     outdir: str,

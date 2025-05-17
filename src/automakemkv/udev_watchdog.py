@@ -5,7 +5,6 @@ Utilities for ripping titles
 
 import logging
 import signal
-from functools import partial
 from threading import Event
 
 from PyQt5 import QtCore
@@ -13,7 +12,6 @@ from PyQt5 import QtCore
 import pyudev
 
 from . import UUID_ROOT, OUTDIR, DBDIR
-from . import paths
 from . import ripper
 from .ui import dialogs
 
@@ -88,7 +86,6 @@ class UdevWatchdog(QtCore.QThread):
         self.extras = extras
         self.convention = convention
         self.root = root
-        self.filegen = partial(paths.outfile, convention=self.convention)
         self.progress_dialog = progress_dialog
 
         self._mounting = {}
@@ -118,7 +115,6 @@ class UdevWatchdog(QtCore.QThread):
         self.everything = kwargs.get('everything', self.everything)
         self.extras = kwargs.get('extras', self.extras)
         self.convention = kwargs.get('convention', self.convention)
-        self.filegen = partial(paths.outfile, convention=self.convention)
 
     def get_settings(self):
 
@@ -222,7 +218,7 @@ class UdevWatchdog(QtCore.QThread):
             self.extras,
             self.dbdir,
             self.root,
-            self.filegen,
+            self.convention,
             self.progress_dialog,
         )
 

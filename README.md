@@ -21,4 +21,6 @@ For more information about the database, refer to the database README.
 
 # The GUI
 
-
+# To do
+Need to have some logic for which watchdog to load in; linux for linux, windows
+for windows, etc.

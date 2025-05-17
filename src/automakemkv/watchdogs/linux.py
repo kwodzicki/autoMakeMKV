@@ -4,16 +4,13 @@ Utilities for ripping titles
 """
 
 import logging
-import signal
-from threading import Event
-
-from PyQt5 import QtCore
 
 import pyudev
 
-from . import UUID_ROOT, OUTDIR, DBDIR
-from . import ripper
-from .ui import dialogs
+from .. import UUID_ROOT, OUTDIR, DBDIR
+
+from . import RUNNING
+from .base import BaseWatchdog
 
 KEY = 'DEVNAME'
 CHANGE = 'DISK_MEDIA_CHANGE'
@@ -22,13 +19,8 @@ STATUS = "ID_CDROM_MEDIA_STATE"
 EJECT = "DISK_EJECT_REQUEST"  # This appears when initial eject requested
 READY = "SYSTEMD_READY"  # This appears when disc tray is out
 
-RUNNING = Event()
 
-signal.signal(signal.SIGINT, lambda *args: RUNNING.set())
-signal.signal(signal.SIGTERM, lambda *args: RUNNING.set())
-
-
-class UdevWatchdog(QtCore.QThread):
+class Watchdog(BaseWatchdog):
     """
     Main watchdog for disc monitoring/ripping
 
@@ -41,8 +33,6 @@ class UdevWatchdog(QtCore.QThread):
     will start.
 
     """
-
-    HANDLE_DISC = QtCore.pyqtSignal(str)
 
     def __init__(
         self,
@@ -88,43 +78,9 @@ class UdevWatchdog(QtCore.QThread):
         self.root = root
         self.progress_dialog = progress_dialog
 
-        self._mounting = {}
-        self._mounted = {}
         self._context = pyudev.Context()
         self._monitor = pyudev.Monitor.from_netlink(self._context)
         self._monitor.filter_by(subsystem='block')
-
-    @property
-    def outdir(self):
-        return self._outdir
-
-    @outdir.setter
-    def outdir(self, val):
-        self.log.info('Output directory set to : %s', val)
-        self._outdir = val
-
-    def set_settings(self, **kwargs):
-        """
-        Set options for ripping discs
-
-        """
-
-        self.log.debug('Updating ripping options')
-        self.dbdir = kwargs.get('dbdir', self.dbdir)
-        self.outdir = kwargs.get('outdir', self.outdir)
-        self.everything = kwargs.get('everything', self.everything)
-        self.extras = kwargs.get('extras', self.extras)
-        self.convention = kwargs.get('convention', self.convention)
-
-    def get_settings(self):
-
-        return {
-            'dbdir': self.dbdir,
-            'outdir': self.outdir,
-            'everything': self.everything,
-            'extras': self.extras,
-            'convention': self.convention,
-        }
 
     def run(self):
         """
@@ -183,46 +139,3 @@ class UdevWatchdog(QtCore.QThread):
             self.log.debug("%s - Finished mounting", dev)
             self._mounted[dev] = None
             self.HANDLE_DISC.emit(dev)
-
-    def _ejecting(self, dev):
-
-        proc = self._mounted.pop(dev, None)
-        if proc is None:
-            return
-
-        if proc.isRunning():
-            self.log.warning("%s - Killing the ripper process!", dev)
-            proc.terminate(dev)
-            return
-
-    def quit(self, *args, **kwargs):
-        RUNNING.set()
-
-    def rip_failure(self, device: str):
-
-        dialog = dialogs.RipFailure(device)
-        dialog.exec_()
-
-    def rip_success(self, device: str):
-
-        dialog = dialogs.RipSuccess(device)
-        dialog.exec_()
-
-    @QtCore.pyqtSlot(str)
-    def handle_disc(self, dev: str):
-
-        obj = ripper.DiscHandler(
-            dev,
-            self.outdir,
-            self.everything,
-            self.extras,
-            self.dbdir,
-            self.root,
-            self.convention,
-            self.progress_dialog,
-        )
-
-        obj.FAILURE.connect(self.rip_failure)
-        obj.SUCCESS.connect(self.rip_success)
-
-        self._mounted[dev] = obj

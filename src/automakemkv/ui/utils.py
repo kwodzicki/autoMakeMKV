@@ -116,8 +116,18 @@ def db_migrate(discid: str | None, hashid: str, dbdir: str | None):
     log.debug("Migrating data: %s --> %s", old_path, new_path)
     old_infopath = os.path.splitext(old_path)[0] + INFO_EXT
     new_infopath = os.path.splitext(new_path)[0] + INFO_EXT
-    shutil.copy(old_path, new_path)
     shutil.copy(old_infopath, new_infopath)
+
+    # Read in old json file
+    with open(old_path, mode='r') as iid:
+        data = json.load(iid)
+
+    # Insert new hash into json
+    data['thediscdb'] = hashid
+
+    # Write out data to new file
+    with open(new_path, mode='w') as oid:
+        json.dump(data, oid, indent=4)
 
     return new_path
 

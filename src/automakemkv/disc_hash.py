@@ -6,6 +6,7 @@ Compute disc has based on contents
 import logging
 import os
 import sys
+import time
 import hashlib
 
 HOME = os.path.expanduser('~')
@@ -40,11 +41,30 @@ def get_hash(root: str | None) -> str | None:
         if item.endswith(ext)
     ]
 
+    attempts = 3
+    while attempts > 0:
+        sizes = None
+        attempts -= 1
+        try:
+            sizes = get_file_sizes(paths)
+        except Exception as err:
+            log.debug(
+                "%s - Failed to get file sizes; %d attempts remain: %s",
+                root,
+                attempts,
+                err,
+            )
+            time.sleep(1.0)
+        else:
+            break
+
+    if sizes is None:
+        log.error("%s - Failed to get file sizes for hash compute!", root)
+        return
+
     content_hash = hashlib.md5()
-    for path in sorted(paths):
-        finfo = os.stat(path)
-        ss = finfo.st_size.to_bytes(8, byteorder=sys.byteorder, signed=True)
-        content_hash.update(ss)
+    for item in sizes:
+        content_hash.update(item)
 
     try:
         return content_hash.hexdigest().upper()
@@ -55,6 +75,25 @@ def get_hash(root: str | None) -> str | None:
             err,
         )
         return None
+
+
+def get_file_sizes(paths: list[str]) -> list:
+    """
+    Get size of files
+
+    Need size of all files to compute hash for disc. Done in this function
+    so that call can be wrapped in try/except with retries and waits between
+    trys
+
+    """
+
+    output = []
+    for path in sorted(paths):
+        finfo = os.stat(path)
+        output.append(
+            finfo.st_size.to_bytes(8, byteorder=sys.byteorder, signed=True)
+        )
+    return output
 
 
 if __name__ == "__main__":

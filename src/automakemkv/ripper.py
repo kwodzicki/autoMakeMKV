@@ -38,9 +38,9 @@ class DiscHandler(QtCore.QObject):
         outdir: str,
         everything: bool,
         extras: bool,
+        convention: str,
         dbdir: str,
         root: str,
-        convention: str,
         progress_dialog,
         **kwargs,
     ):

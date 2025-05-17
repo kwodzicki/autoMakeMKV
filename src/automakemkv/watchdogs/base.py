@@ -114,9 +114,9 @@ class BaseWatchdog(QtCore.QThread):
             self.outdir,
             self.everything,
             self.extras,
+            self.convention,
             self.dbdir,
             self.root,
-            self.convention,
             self.progress_dialog,
         )
 

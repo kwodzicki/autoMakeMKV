@@ -4,20 +4,16 @@ Utilities for ripping titles
 """
 
 import logging
+from threading import Thread
+from queue import Queue
 
-import pyudev
+import wmi
+import pythoncom
 
 from .. import UUID_ROOT, OUTDIR, DBDIR
 
 from . import RUNNING
 from .base import BaseWatchdog
-
-KEY = 'DEVNAME'
-CHANGE = 'DISK_MEDIA_CHANGE'
-CDTYPE = "ID_CDROM"
-STATUS = "ID_CDROM_MEDIA_STATE"
-EJECT = "DISK_EJECT_REQUEST"  # This appears when initial eject requested
-READY = "SYSTEMD_READY"  # This appears when disc tray is out
 
 
 class Watchdog(BaseWatchdog):
@@ -64,7 +60,6 @@ class Watchdog(BaseWatchdog):
 
         super().__init__()
         self.log = logging.getLogger(__name__)
-        self.log.debug("%s started", __name__)
 
         self.dbdir = kwargs.get('dbdir', DBDIR)
         self.outdir = outdir
@@ -74,9 +69,8 @@ class Watchdog(BaseWatchdog):
         self.root = root
         self.progress_dialog = progress_dialog
 
-        self._context = pyudev.Context()
-        self._monitor = pyudev.Monitor.from_netlink(self._context)
-        self._monitor.filter_by(subsystem='block')
+        self._monitor = OpticalMediaDetector()
+        self._monitor.start()
 
     def run(self):
         """
@@ -89,43 +83,18 @@ class Watchdog(BaseWatchdog):
 
         self.log.info('Watchdog thread started')
         while not RUNNING.is_set():
-            device = self._monitor.poll(timeout=1.0)
-            if device is None:
+            try:
+                info = self._monitor.poll(timeout=1.0)
+            except Exception:
+                continue
+            
+            if info is None:
                 continue
 
-            # Get value for KEY. If is None, then did not exist, so continue
-            dev = device.properties.get(KEY, None)
-            if dev is None:
-                continue
-
-            # Every optical drive should support CD, so check if the device
-            # has the CDTYPE flag, if not we ignore it
-            if device.properties.get(CDTYPE, '') != '1':
-                continue
-
-            if device.properties.get(EJECT, ''):
+            action, dev = info
+            if action == 'unmount':
                 self.log.debug("%s - Eject request", dev)
                 self._ejecting(dev)
-                continue
-
-            if device.properties.get(READY, '') == '0':
-                self.log.debug("%s - Drive is ejectecd", dev)
-                self._ejecting(dev)
-                continue
-
-            if device.properties.get(CHANGE, '') != '1':
-                self.log.debug(
-                    "%s - Not a '%s' event, ignoring",
-                    dev,
-                    CHANGE,
-                )
-                continue
-
-            if device.properties.get(STATUS, '') != 'complete':
-                self.log.debug(
-                    "%s - Caught event that was NOT insert/eject, ignoring",
-                    dev,
-                )
                 continue
 
             if dev in self._mounted:
@@ -135,3 +104,63 @@ class Watchdog(BaseWatchdog):
             self.log.debug("%s - Finished mounting", dev)
             self._mounted[dev] = None
             self.HANDLE_DISC.emit(dev)
+
+
+class OpticalMediaDetector(Thread):
+    def __init__(self, interval: int | float = 5.0):
+        super().__init__()
+        self.log = logging.getLogger(__name__)
+        self.interval = max(interval, 2.0)  # Ensure at least 2 seconds
+        self.queue = Queue()
+
+    def run(self):
+        pythoncom.CoInitialize()
+        wmi_obj = wmi.WMI()
+        previous_status = get_cdrom_status(wmi_obj)
+        while not RUNNING.wait(timeout=self.interval):
+            current_status = get_cdrom_status(wmi_obj)
+    
+            for drive in current_status:
+                was_loaded = previous_status.get(drive, False)
+                is_loaded = current_status[drive]
+
+                action = None
+                if not was_loaded and is_loaded:
+                    action = 'mount'
+                    self.log.debug("Media inserted into drive '%s'", drive)
+                elif was_loaded and not is_loaded:
+                    action = 'unmount'
+                    self.log.debug("Media ejected from drive '%s'", drive)
+
+                if action is not None:
+                    self.queue.put((action, drive))
+
+            previous_status = current_status
+        self.queue.put(None)
+
+    def poll(self, *args, **kwargs):
+
+        # Try to get item from queue.
+        # On fail, reraise exception
+        # On pass, signal task done
+        try:
+            res = self.queue.get(*args, **kwargs)
+        except Exception as err:
+            raise err
+        else:
+            self.queue.task_done()
+
+        return res
+
+
+def get_cdrom_status(c):
+    """Returns a dict of {drive_letter: has_media (bool)}"""
+    status = {}
+    for cdrom in c.Win32_CDROMDrive():
+        drive = cdrom.Drive
+        try:
+            has_media = cdrom.MediaLoaded
+        except:
+            has_media = False
+        status[drive] = has_media
+    return status

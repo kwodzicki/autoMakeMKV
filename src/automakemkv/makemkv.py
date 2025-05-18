@@ -20,7 +20,7 @@ from subprocess import (
 
 from PyQt5 import QtCore
 
-from . import DBDIR
+from . import DBDIR, MAKEMKVCON
 from .mkv_lookup import AP
 
 DEVICE_MSG = 'DRV:'
@@ -241,7 +241,7 @@ class MakeMKVThread(QtCore.QThread):
         #     return
 
         cmd = [
-            'makemkvcon',
+            MAKEMKVCON,
             *opts,
             self.command,
             "{}:{}".format(*self.source),

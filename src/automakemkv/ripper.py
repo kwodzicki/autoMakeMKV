@@ -9,6 +9,7 @@ import shutil
 import subprocess
 from PyQt5 import QtCore
 
+from . import MKVMERGE
 from . import utils
 from . import disc_hash
 from . import makemkv
@@ -576,7 +577,7 @@ class Ripper(QtCore.QThread):
                 continue
 
             # Build mkvmerge command to run
-            cmd = ['mkvmerge', '-o', output]
+            cmd = [MKVMERGE, '-o', output]
             if lang is not None:
                 cmd.extend(lang_opts)
             cmd.append(title_src)

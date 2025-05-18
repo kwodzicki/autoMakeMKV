@@ -9,12 +9,12 @@ from . import utils
 from . import widgets
 
 
-class MissingOutdirDialog(QtWidgets.QDialog):
-    def __init__(self, outdir: str, name: str = NAME):
+class MissingDirDialog(QtWidgets.QDialog):
+    def __init__(self, outdir: str, dtype: str, name: str = NAME):
         super().__init__()
 
         self._name = name
-        self.setWindowTitle(f"{self._name}: Output Directory Missing!")
+        self.setWindowTitle(f"{self._name}: {dtype} Directory Missing!")
 
         QBtn = QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Abort
 

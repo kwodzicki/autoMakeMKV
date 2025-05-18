@@ -24,7 +24,7 @@ def get_discid(discDev: str, root: str = UUID_ROOT, **kwargs) -> str | None:
 
     """
 
-    if sys.platform != 'linux':
+    if not sys.platform.startswith('linux'):
         return
 
     for item in os.listdir(root):
@@ -39,8 +39,11 @@ def get_discid(discDev: str, root: str = UUID_ROOT, **kwargs) -> str | None:
 
 def dev_to_mount(dev: str, root: str = LABEL_ROOT, **kwargs) -> str | None:
 
-    uname = os.getlogin()
+    # If on windows, dev is already mount point
+    if sys.platform.startswith('win'):
+        return dev
 
+    uname = os.getlogin()
     t0 = time.monotonic()
     t1 = t0 + TIMEOUT
 

@@ -7,10 +7,16 @@ from PyQt5 import QtWidgets
 from PyQt5 import QtCore
 
 from .. import LOG, STREAM, NAME
-from ..watchdogs import linux
 from . import progress
 from . import dialogs
 from . import utils
+
+if sys.platform.startswith('linux'):
+    from ..watchdogs import linux as disc_watchdog
+elif sys.platform.startswith('win'):
+    from ..watchdogs import windows as disc_watchdog
+else:
+    raise Exception(f"Platform '{sys.platform}' not currently supported!")
 
 
 class SystemTray(QtWidgets.QSystemTrayIcon):
@@ -58,7 +64,7 @@ class SystemTray(QtWidgets.QSystemTrayIcon):
         settings = utils.load_settings()
 
         self.progress = progress.ProgressDialog()
-        self.ripper = linux.Watchdog(
+        self.ripper = disc_watchdog.Watchdog(
             self.progress,
             **settings,
         )
@@ -68,7 +74,7 @@ class SystemTray(QtWidgets.QSystemTrayIcon):
         # loop starts
         QtCore.QTimer.singleShot(
             0,
-            self.check_outdir_exists,
+            self.check_dirs_exists,
         )
 
     def settings_widget(self, *args, **kwargs):
@@ -106,32 +112,38 @@ class SystemTray(QtWidgets.QSystemTrayIcon):
             self.ripper.quit()
             self._app.quit()
 
-    def check_outdir_exists(self):
+    def check_dirs_exists(self):
         """
         Check that video output directory exists
 
         """
 
-        if os.path.isdir(self.ripper.outdir):
-            return
+        dirs = {
+            'outdir': 'Output',
+            'dbdir': 'Database',
+        }
+        for dir, lname in dirs.items():
+            val = getattr(self.ripper, dir)
+            if os.path.isdir(val):
+                continue
 
-        dlg = dialogs.MissingOutdirDialog(self.ripper.outdir)
-        if not dlg.exec_():
-            self.quit(force=True)
-            return
+            dlg = dialogs.MissingDirDialog(val, lname)
+            if not dlg.exec_():
+                self.quit(force=True)
+                continue
 
-        path = QtWidgets.QFileDialog.getExistingDirectory(
-            QtWidgets.QDialog(),
-            f'{self._name}: Select Output Folder',
-        )
-        if path != '':
-            self.ripper.outdir = path
-            utils.save_settings(
-                self.ripper.get_settings(),
+            path = QtWidgets.QFileDialog.getExistingDirectory(
+                QtWidgets.QDialog(),
+                f'{self._name}: Select {lname} Folder',
             )
-            return
+            if path != '':
+                setattr(self.ripper, dir, path)
+                settings = self.ripper.get_settings()
+                print(settings)
+                utils.save_settings(settings)
+                continue
 
-        self.check_outdir_exists()
+            self.check_dirs_exists()
 
 
 def cli():

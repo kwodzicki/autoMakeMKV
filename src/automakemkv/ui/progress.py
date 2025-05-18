@@ -520,12 +520,12 @@ class ProgressParser(QtCore.QThread):
                 continue
 
             cli = self.proc.args[0]
-            if cli == 'makemkvcon':
+            if 'makemkvcon' in cli:
                 self.parse_makemkvcon(line)
-            elif cli == 'mkvmerge':
+            elif 'mkvmerge' in cli:
                 self.parse_mkvmerge(line)
             else:
-                self.log.error("Parser not implemented for: %s", cli)
+                self.log.debug("Parser not implemented for: %s", cli)
 
         self.PROGRESS_VALUE.emit(-1, -1, -1)
         self.log.debug("Progress processor thread dead")

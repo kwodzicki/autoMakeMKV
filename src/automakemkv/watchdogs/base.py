@@ -32,7 +32,6 @@ class BaseWatchdog(QtCore.QThread):
     def __init__(self):
         super().__init__()
         self.log = logging.getLogger(__name__)
-        self.log.debug("%s started", __name__)
 
         self.HANDLE_DISC.connect(self.handle_disc)
 

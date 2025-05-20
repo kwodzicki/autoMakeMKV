@@ -107,10 +107,10 @@ class Watchdog(BaseWatchdog):
 
 
 class OpticalMediaDetector(Thread):
-    def __init__(self, interval: int | float = 5.0):
+    def __init__(self, interval: int | float = 2.0):
         super().__init__()
         self.log = logging.getLogger(__name__)
-        self.interval = max(interval, 2.0)  # Ensure at least 2 seconds
+        self.interval = max(interval, 0.5)  # Ensure at least half second
         self.queue = Queue()
 
     def run(self):
@@ -119,18 +119,15 @@ class OpticalMediaDetector(Thread):
         previous_status = get_cdrom_status(wmi_obj)
         while not RUNNING.wait(timeout=self.interval):
             current_status = get_cdrom_status(wmi_obj)
-    
-            for drive in current_status:
+
+            for drive, is_loaded in current_status.items():
                 was_loaded = previous_status.get(drive, False)
-                is_loaded = current_status[drive]
 
                 action = None
                 if not was_loaded and is_loaded:
                     action = 'mount'
-                    self.log.debug("Media inserted into drive '%s'", drive)
                 elif was_loaded and not is_loaded:
                     action = 'unmount'
-                    self.log.debug("Media ejected from drive '%s'", drive)
 
                 if action is not None:
                     self.queue.put((action, drive))
@@ -155,12 +152,27 @@ class OpticalMediaDetector(Thread):
 
 def get_cdrom_status(c):
     """Returns a dict of {drive_letter: has_media (bool)}"""
+
+    log = logging.getLogger(__name__)
     status = {}
-    for cdrom in c.Win32_CDROMDrive():
-        drive = cdrom.Drive
+
+    try:
+        drives = c.Win32_CDROMDrive()
+    except Exception as err:
+        log.warning("Failed to get list of drives")
+        return status
+
+    for cdrom in drives:
         try:
-            has_media = cdrom.MediaLoaded
+            drive = cdrom.Drive
+        except:
+            log.warning("Failed to get drive")
+            continue
+
+        try:
+            has_media = drive.MediaLoaded
         except:
             has_media = False
+
         status[drive] = has_media
     return status

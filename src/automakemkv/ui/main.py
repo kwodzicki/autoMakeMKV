@@ -6,7 +6,7 @@ import argparse
 from PyQt5 import QtWidgets
 from PyQt5 import QtCore
 
-from .. import LOG, STREAM, NAME
+from .. import LOG, STREAM, ROTFILE, NAME
 from . import progress
 from . import dialogs
 from . import utils
@@ -157,6 +157,7 @@ def cli():
 
     args = parser.parse_args()
 
+    ROTFILE.setLevel(args.loglevel)
     STREAM.setLevel(args.loglevel)
     LOG.addHandler(STREAM)
 

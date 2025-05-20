@@ -44,6 +44,8 @@ DEFAULT_KWARGS = {
 SWITCHES = ('noscan', 'robot', 'decrypt')
 SOURCES = ('iso', 'file', 'disc', 'dev')
 COMMANDS = ('info', 'mkv', 'backup', 'f', 'reg')
+COMPLETE_PATTERN = 'Copy Complete'
+FAIL_PATTERN = 'Backup failed'
 RESULTS_PREFIX = ("MSG:5004", "MSG:5037")
 
 
@@ -181,6 +183,14 @@ class MakeMKVThread(QtCore.QThread):
         return self._check_type('dev')
 
     @property
+    def success(self) -> bool:
+        return self._success
+
+    @property
+    def failure(self) -> bool:
+        return self._failure
+
+    @property
     def dev(self):
         return self._dev
 
@@ -273,39 +283,20 @@ class MakeMKVThread(QtCore.QThread):
 
     def check_result(self, line: str) -> str:
 
-        # If not a result-of-rip message, return line
-        if not line.startswith(RESULTS_PREFIX):
-            return line
-
         # If already determined success/failure, return line
         if self._success or self._failure:
             return line
 
-        # Try to extact the number of success/failures from messages
-        info = [val.strip().strip('"') for val in line.split(',')]
-        try:
-            success, failure = map(int, info[-2:])
-        except Exception as err:
-            self.log.debug(
-                "%s - Failed to parse success/failure values: %s",
-                self.source[1],
-                err,
-            )
-            return line
-
-        if failure > 0:
-            self._failure = True
-            self.log.error("%s - Rip failed", self.source[1])
-            self.FAILURE.emit('{}:{}'.format(*self.source))
-        elif success > 0:
+        # If not a result-of-rip message, return line
+        if COMPLETE_PATTERN in line:
             self._success = True
             self.log.error("%s - Rip success", self.source[1])
             self.SUCCESS.emit('{}:{}'.format(*self.source))
-        else:
-            self.log.warning(
-                "%s - Ripped nothing; no success or failure reported",
-                self.source[1],
-            )
+        elif FAIL_PATTERN in line:
+            self._failure = True
+            self.log.error("%s - Rip failed", self.source[1])
+            self.FAILURE.emit('{}:{}'.format(*self.source))
+
         return line
 
     def terminate(self):

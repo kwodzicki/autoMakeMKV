@@ -148,6 +148,7 @@ class DiscHandler(QtCore.QObject):
         info, sizes = metadata.utils.load_metadata(
             discid=self.discid,
             hashid=self.hashid,
+            dbdir=self.dbdir,
         )
 
         # Open dics metadata GUI and register "callback" for when closes
@@ -270,10 +271,15 @@ class Ripper(QtCore.QThread):
         self.extras = extras
         self.convention = convention
         self.progress = progress
-        self.tmpdir = os.path.join(
-            outdir,
-            os.path.basename(dev),
-        )
+
+        # To handle windows mount points, use drive split. Will be
+        # empty on linux/mac
+        drive, tail = os.path.splitdrive(dev)
+        if drive == '':
+            tmpdir = os.path.basename(dev)
+        else:
+            tmpdir = drive.rstrip(":") + "_drive"
+        self.tmpdir = os.path.join(outdir, tmpdir)
 
         if self.progress is not None:
             self.progress.CANCEL.connect(self.terminate)
@@ -485,6 +491,8 @@ class Ripper(QtCore.QThread):
             self.extract_titles_from_dvd_iso(paths, tmppath)
         else:
             self.extract_titles_from_bluray_iso(paths, tmppath)
+
+        return
 
         # Attempt to remove the backup (tmp) file
         if os.path.isdir(tmppath):

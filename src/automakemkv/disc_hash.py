@@ -70,7 +70,8 @@ def get_hash(root: str | None) -> str | None:
         return content_hash.hexdigest().upper()
     except Exception as err:
         log.exception(
-            'Failed to create disc hash for "%s": %s',
+            '%s - Failed to create disc hash for "%s": %s',
+            root,
             path,
             err,
         )

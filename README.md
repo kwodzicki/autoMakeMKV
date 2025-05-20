@@ -6,6 +6,12 @@ Simply start the software, point it to the database, and start inserting discs.
 If a disc is NOT found in the database, a GUI will appear on screen enabling you to tag the tracks to be backed up from the disc.
 After this informaiton is entered, the backup will begin.
 
+# Required External Programs
+You will need the MakeMKV program installed for this to work as this program actually creates the disc backs.
+
+You will also need to install MKVToolNix, as the included `mkvmerge` program is required for extraction from some disk backups.
+
+
 # The Database
 
 A separate git repo houses the disc database.
@@ -21,6 +27,3 @@ For more information about the database, refer to the database README.
 
 # The GUI
 
-# To do
-Need to have some logic for which watchdog to load in; linux for linux, windows
-for windows, etc.

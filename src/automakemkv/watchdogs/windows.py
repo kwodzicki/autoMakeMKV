@@ -7,8 +7,11 @@ import logging
 from threading import Thread
 from queue import Queue
 
-import wmi
-import pythoncom
+from PyQt5 import QtWidgets, QtCore
+import win32con
+import win32file
+import win32gui
+import win32gui_struct
 
 from .. import UUID_ROOT, OUTDIR, DBDIR
 
@@ -69,110 +72,68 @@ class Watchdog(BaseWatchdog):
         self.root = root
         self.progress_dialog = progress_dialog
 
-        self._monitor = OpticalMediaDetector()
-        self._monitor.start()
+        # Use invisible QWidget to obtain an HWND
+        self.hidden_window = QtWidgets.QWidget()
+        self.hidden_window.setWindowFlags(QtCore.Qt.Widget | QtCore.Qt.Tool)
+        self.hidden_window.hide()
 
-    def run(self):
-        """
-        Processing for thread
+        # Subclass native winEventProc
+        self.hwnd = int(self.hidden_window.winId())
+        self.old_proc = win32gui.SetWindowLong(
+            self.hwnd,
+            win32con.GWL_WNDPROC,
+            self.event_handler,
+        )
 
-        Polls udev for device changes, running MakeMKV pipelines
-        when dvd/bluray found
-
-        """
-
-        self.log.info('Watchdog thread started')
-        while not RUNNING.is_set():
+    def event_handler(self, hwnd, msg, wparam, lparam):
+        if msg == win32con.WM_DEVICECHANGE and wparam is not None:
             try:
-                info = self._monitor.poll(timeout=1.0)
+                dev_broadcast = win32gui_struct.UnpackDEV_BROADCAST(lparam)
             except Exception:
-                continue
-            
-            if info is None:
-                continue
+                pass
+            else:
+                if dev_broadcast and getattr(dev_broadcast, 'devicetype', None) == win32con.DBT_DEVTYP_VOLUME:
+                    drives = self._mask_to_letters(dev_broadcast.unitmask)
+                    for dev in drives:
+                        if not self._is_cdrom(dev):
+                            continue
 
-            action, dev = info
-            if action == 'unmount':
-                self.log.debug("%s - Eject request", dev)
-                self._ejecting(dev)
-                continue
+                        if wparam != win32con.DBT_DEVICEARRIVAL:
+                            self.log.debug("%s - Eject request", dev)
+                            self._ejecting(dev)
+                            continue
 
-            if dev in self._mounted:
-                self.log.info("%s - Device in mounted list", dev)
-                continue
+                        if dev in self._mounted:
+                            self.log.info("%s - Device in mounted list", dev)
+                            continue
 
-            self.log.debug("%s - Finished mounting", dev)
-            self._mounted[dev] = None
-            self.HANDLE_DISC.emit(dev)
+                        self.log.debug("%s - Finished mounting", dev)
+                        self._mounted[dev] = None
+                        self.HANDLE_DISC.emit(dev)
 
+        return win32gui.CallWindowProc(self.old_proc, hwnd, msg, wparam, lparam)
 
-class OpticalMediaDetector(Thread):
-    def __init__(self, interval: int | float = 2.0):
-        super().__init__()
-        self.log = logging.getLogger(__name__)
-        self.interval = max(interval, 0.5)  # Ensure at least half second
-        self.queue = Queue()
+    def _mask_to_letters(self, mask):
+        return [
+            chr(65 + i) + ':'
+            for i in range(26)
+            if (mask >> i) & 1
+        ]
 
-    def run(self):
-        pythoncom.CoInitialize()
-        wmi_obj = wmi.WMI()
-        previous_status = get_cdrom_status(wmi_obj)
-        while not RUNNING.wait(timeout=self.interval):
-            current_status = get_cdrom_status(wmi_obj)
-
-            for drive, is_loaded in current_status.items():
-                was_loaded = previous_status.get(drive, False)
-
-                action = None
-                if not was_loaded and is_loaded:
-                    action = 'mount'
-                elif was_loaded and not is_loaded:
-                    action = 'unmount'
-
-                if action is not None:
-                    self.queue.put((action, drive))
-
-            previous_status = current_status
-        self.queue.put(None)
-
-    def poll(self, *args, **kwargs):
-
-        # Try to get item from queue.
-        # On fail, reraise exception
-        # On pass, signal task done
+    def _is_cdrom(self, drive_letter):
         try:
-            res = self.queue.get(*args, **kwargs)
-        except Exception as err:
-            raise err
-        else:
-            self.queue.task_done()
-
-        return res
-
-
-def get_cdrom_status(c):
-    """Returns a dict of {drive_letter: has_media (bool)}"""
-
-    log = logging.getLogger(__name__)
-    status = {}
-
-    try:
-        drives = c.Win32_CDROMDrive()
-    except Exception as err:
-        log.warning("Failed to get list of drives")
-        return status
-
-    for cdrom in drives:
-        try:
-            drive = cdrom.Drive
+            return win32file.GetDriveType(f"{drive_letter}\\") == win32file.DRIVE_CDROM
         except:
-            log.warning("Failed to get drive")
-            continue
+            return False
 
-        try:
-            has_media = drive.MediaLoaded
-        except:
-            has_media = False
 
-        status[drive] = has_media
-    return status
+    def start(self):
+        """
+        Overload as do not want the thread to start
+
+        """
+
+        pass
+
+
+

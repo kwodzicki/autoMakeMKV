@@ -84,13 +84,8 @@ class BaseWatchdog(QtCore.QThread):
     def _ejecting(self, dev):
 
         proc = self._mounted.pop(dev, None)
-        if proc is None:
-            return
-
-        if proc.isRunning():
-            self.log.warning("%s - Killing the ripper process!", dev)
+        if proc is not None:
             proc.terminate(dev)
-            return
 
     def quit(self, *args, **kwargs):
         RUNNING.set()

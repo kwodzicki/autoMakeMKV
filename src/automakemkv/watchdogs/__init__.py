@@ -8,5 +8,9 @@ from threading import Event
 
 RUNNING = Event()
 
-signal.signal(signal.SIGINT, lambda *args: RUNNING.set())
-signal.signal(signal.SIGTERM, lambda *args: RUNNING.set())
+def set_event(*args, **kwargs):
+    print('Caught signal')
+    RUNNING.set()
+
+signal.signal(signal.SIGINT, set_event)
+signal.signal(signal.SIGTERM, set_event)

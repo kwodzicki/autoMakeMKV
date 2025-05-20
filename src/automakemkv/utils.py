@@ -1,6 +1,10 @@
 import os
 import sys
 import time
+from subprocess import call
+
+if sys.platform.startswith('win'):
+    import ctypes
 
 from . import UUID_ROOT, LABEL_ROOT, HOMEDIR
 
@@ -87,3 +91,18 @@ def load_makemkv_settings() -> dict:
             settings[key.strip()] = val.strip().strip('"')
 
     return settings
+
+
+def eject(dev: str) -> None:
+    """
+    Eject the disc
+
+    """
+
+    if sys.platform.startswith('linux'):
+        call(['eject', dev])
+    elif sys.platform.startswith('win'):
+        command = f"open {dev}: type CDAudio alias drive"
+        ctypes.windll.winmm.mciSendStringW(command, None, 0, None)
+        ctypes.windll.winmm.mciSendStringW("set drive door open", None, 0, None)
+        ctypes.windll.winmm.mciSendStringW("close drive", None, 0, None)

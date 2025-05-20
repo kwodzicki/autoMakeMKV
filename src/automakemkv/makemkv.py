@@ -21,6 +21,7 @@ from subprocess import (
 from PyQt5 import QtCore
 
 from . import DBDIR, MAKEMKVCON
+from .utils import eject
 from .mkv_lookup import AP
 
 DEVICE_MSG = 'DRV:'
@@ -345,7 +346,7 @@ class MakeMKVRip(MakeMKVThread):
 
         if self.dev is not None:
             self.log.debug("%s - Ejecting disc", self.dev)
-            call(['eject', self.dev])
+            eject(self.dev)
 
         self.log.info("MakeMKVRip thread dead")
 
@@ -527,7 +528,7 @@ def _dev_to_disc(timeout: float | int = 60.0) -> dict:
     output = {}
     try:
         info = check_output(
-            ['makemkvcon', '--robot', '--noscan', 'info', 'disc'],
+            [MAKEMKVCON, '--robot', '--noscan', 'info', 'disc'],
             timeout=timeout,
         )
     except TimeoutExpired as err:

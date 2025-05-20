@@ -88,7 +88,7 @@ class SystemTray(QtWidgets.QSystemTrayIcon):
 
     def quit(self, *args, **kwargs):
         """Display quit confirm dialog"""
-        self.__log.info('Saving settings')
+        self.__log.info('Quitting program')
 
         utils.save_settings(
             self.ripper.get_settings(),
@@ -164,4 +164,5 @@ def cli():
     app = QtWidgets.QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)
     _ = SystemTray(app)
-    app.exec_()
+    res = app.exec_()
+    sys.exit(res)

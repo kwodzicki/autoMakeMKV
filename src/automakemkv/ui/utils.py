@@ -1,9 +1,14 @@
 import logging
 import os
+import sys
 import shutil
 import re
 import json
 import gzip
+
+if sys.platform.startswith('win'):
+    import wmi
+    import pythoncom
 
 from .. import OUTDIR, DBDIR, SETTINGS_FILE
 
@@ -174,6 +179,22 @@ def file_from_id(discid: str, dbdir: str | None = None):
 
 
 def get_vendor_model(path: str) -> tuple[str]:
+
+    vendor = model = ''
+    if sys.platform.startswith('linux'):
+        vendor, model= linux_vendor_model(path)
+    elif sys.platform.startswith('win'):
+        pythoncom.CoInitialize()
+        try:
+            vendor, model = windows_vendor_model(path)
+        except:
+            pass
+        finally:
+            pythoncom.CoUninitialize()
+    return vendor, model
+
+
+def linux_vendor_model(path: str) -> tuple[str]:
     """
     Get the vendor and model of drive
 
@@ -200,3 +221,14 @@ def get_vendor_model(path: str) -> tuple[str]:
         model = ''
 
     return vendor.strip(), model.strip()
+
+
+def windows_vendor_model(path: str) -> tuple[str]:
+
+    c = wmi.WMI()
+    for cd in c.Win32_CDROMDrive():
+        if cd.Drive != path:
+            continue
+        return cd.Name, ''
+
+    return '', ''

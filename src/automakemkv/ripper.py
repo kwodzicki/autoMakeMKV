@@ -95,6 +95,10 @@ class DiscHandler(QtCore.QObject):
 
         """
 
+        if self.ripper is not None:
+            return self.ripper.isRunning()
+        return False
+
         # If ripper not yet defined, still going through motions
         # i.e., running
         if self.ripper is None:
@@ -207,7 +211,7 @@ class DiscHandler(QtCore.QObject):
         # Data already saved to disc by the metadata editor
         if result == metadata.SAVE:
             self.log.info("Requested metadata save and eject: %s", dev)
-            subprocess.call(['eject', dev])
+            utils.eject(dev)
             return
 
         if result == metadata.OPEN:
@@ -319,10 +323,9 @@ class Ripper(QtCore.QThread):
 
         if len(paths) == 1:
             title, output = list(paths.items())[0]
-            self.rip_title(title, output)
-            return
+            return self.rip_title(title, output)
 
-        self.rip_disc(paths)
+        return self.rip_disc(paths)
 
     def rip_title(self, title: str, output: str):
         """
@@ -373,7 +376,7 @@ class Ripper(QtCore.QThread):
             if item.endswith('.mkv')
         ]
 
-        if self.mkv_thread.returncode != 0:
+        if self.mkv_thread.returncode != 0 or self.mkv_thread.failure:
             fdirs = []
             for fname in files:
                 fdir = os.path.dirname(fname)
@@ -469,7 +472,7 @@ class Ripper(QtCore.QThread):
             )
         self.mkv_thread.wait()
 
-        if self.mkv_thread.returncode != 0:
+        if self.mkv_thread.returncode != 0 or self.mkv_thread.failure:
             self.log.warning("%s - Error backing up disc", self.dev)
             try:
                 os.remove(tmppath)
@@ -479,7 +482,7 @@ class Ripper(QtCore.QThread):
                 pass
             os.rmdir(self.tmpdir)
             self.log.debug("%s - Removed dir: %s", self.dev, self.tmpdir)
-            return
+            return False
 
         # Remove the full-disc progress widget, then re-add not-full-disk
         if self.progress is not None:
@@ -492,7 +495,7 @@ class Ripper(QtCore.QThread):
         else:
             self.extract_titles_from_bluray_iso(paths, tmppath)
 
-        return
+        return True
 
         # Attempt to remove the backup (tmp) file
         if os.path.isdir(tmppath):
@@ -690,16 +693,17 @@ class Ripper(QtCore.QThread):
 
         """
 
-        self.rip()
+        result = self.rip()
 
-        try:
-            os.rmdir(self.tmpdir)
-        except Exception as err:
-            self.log.info(
-                "%s - Failed to remove directory: %s",
-                self.dev,
-                err,
-            )
+        if result:
+            try:
+                os.rmdir(self.tmpdir)
+            except Exception as err:
+                self.log.info(
+                    "%s - Failed to remove directory: %s",
+                    self.dev,
+                    err,
+                )
 
         if self.progress is not None:
             self.progress.MKV_REMOVE_DISC.emit(self.dev)
@@ -710,10 +714,11 @@ class Ripper(QtCore.QThread):
         if dev != self.dev:
             return
 
-        self.log.info("%s - Terminating rip", dev)
         self._dead = True
         if self.mkv_thread is None:
             return
+
+        self.log.info("%s - Terminating rip", dev)
         self.mkv_thread.terminate()
 
 

@@ -11,6 +11,8 @@ program suite.
 
 import os
 
+from .utils import replace_chars
+
 EXTRA_LOOKUP = {
     'behindthescenes': 'Behind The Scenes',
     'deleted': 'Deleted Scenes',
@@ -55,8 +57,7 @@ def movie(
 
     movie_lib_name = movie_lib_name or 'Movies'
     base = '{title} ({year}) {{tmdb-{tmdb}}}'.format(**info)
-    fpath = os.path.join(
-        outdir,
+    fpath = (
         movie_lib_name,
         base,
     )
@@ -66,17 +67,24 @@ def movie(
             return None
 
         if info.get('extra', '') in EXTRA_LOOKUP:
-            return os.path.join(
-                fpath,
+            fpath += (
                 EXTRA_LOOKUP[info['extra']],
                 "{extraTitle}{ext}".format(ext=ext, **info),
+            )
+            return os.path.join(
+                outdir,
+                *replace_chars(*fpath),
             )
 
         base = "{base} {edition-{{extraTitle}}}".format(base=base, **info)
     elif extras and not everything:
         return None
 
-    return os.path.join(fpath, f"{base}{ext}")
+    fpath += (f"{base}{ext}",)
+    return os.path.join(
+        outdir,
+        *replace_chars(*fpath),
+    )
 
 
 def series(
@@ -110,8 +118,7 @@ def series(
     """
 
     series_lib_name = series_lib_name or 'TV Shows'
-    fpath = os.path.join(
-        outdir,
+    fpath = (
         series_lib_name,
         '{title} ({year}) {{tvdb-{tvdb}}}'.format(**info)
     )
@@ -124,8 +131,7 @@ def series(
     # If a season number is defined, then add "long" season name directory
     # to the fpath
     if info.get('season', '') != '':
-        fpath = os.path.join(
-            fpath,
+        fpath += (
             "Season {:02d}".format(int(info['season'])),
         )
 
@@ -136,17 +142,23 @@ def series(
         if info.get('episode', '') == '':
             # If no episode number defined, then insert extras directory name
             # in path.
-            return os.path.join(
-                fpath,
+            fpath += (
                 EXTRA_LOOKUP[info['extra']],
                 "{episodeTitle}{ext}".format(ext=ext, **info),
             )
+            return os.path.join(
+                outdir,
+                *replace_chars(*fpath),
+             )
 
         # If here, then episode number was defined and need to append the
         # extra 'type' to the end of the file name
-        return os.path.join(
-            fpath,
+        fpath += (
             "{episodeTitle}-{extra}{ext}".format(ext=ext, **info),
+        )
+        return os.path.join(
+            outdir,
+            *replace_chars(*fpath),
         )
     elif extras and not everything:
         return None
@@ -156,7 +168,10 @@ def series(
         's{season:02d}e{episode:02d}',
         '{episodeTitle}{ext}',
     )
-    return os.path.join(
-        fpath,
+    fpath += (
         ' - '.join(base).format(ext=ext, **info),
+    )
+    return os.path.join(
+        outdir,
+        *replace_chars(*fpath),
     )

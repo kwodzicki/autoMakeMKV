@@ -10,7 +10,6 @@ import gzip
 
 from threading import Event
 from subprocess import (
-    call,
     check_output,
     Popen,
     PIPE,
@@ -21,7 +20,6 @@ from subprocess import (
 from PyQt5 import QtCore
 
 from . import DBDIR, MAKEMKVCON
-from .utils import eject
 from .mkv_lookup import AP
 
 DEVICE_MSG = 'DRV:'
@@ -60,6 +58,7 @@ class MakeMKVThread(QtCore.QThread):
     # Send the dev device that failed
     FAILURE = QtCore.pyqtSignal(str)
     SUCCESS = QtCore.pyqtSignal(str)
+    CANCEL = QtCore.pyqtSignal(str)
 
     def __init__(
         self,
@@ -87,6 +86,7 @@ class MakeMKVThread(QtCore.QThread):
 
         super().__init__()
         self.log = logging.getLogger(__name__)
+        self.CANCEL.connect(self.cancel)
 
         self._dev = None
         self._failure = False
@@ -299,13 +299,13 @@ class MakeMKVThread(QtCore.QThread):
 
         return line
 
-    def terminate(self):
+    @QtCore.pyqtSlot(str)
+    def cancel(self, dev: str):
         """Kill the MakeMKV Process"""
-
-        if self.proc:
+        self.log.info('Cancel request: %s --> %s', dev, self.dev)
+        if dev == self.dev and self.proc:
             self.log.info('Killing process')
             self.proc.kill()
-        super().wait()
 
 
 class MakeMKVRip(MakeMKVThread):
@@ -319,9 +319,8 @@ class MakeMKVRip(MakeMKVThread):
         super().__init__(command, **kwargs)
         self.pipe = pipe or 'stderr'
 
-    def run(self):
+    def monitor_proc(self):
 
-        self.makemkvcon()
         if self.proc is None:
             return
 
@@ -335,11 +334,12 @@ class MakeMKVRip(MakeMKVThread):
         self.proc.wait()
         self.proc.communicate()
 
-        if self.dev is not None:
-            self.log.debug("%s - Ejecting disc", self.dev)
-            eject(self.dev)
-
         self.log.info("MakeMKVRip thread dead")
+
+    def run(self):
+
+        self.makemkvcon()
+        self.monitor_proc()
 
 
 class MakeMKVInfo(MakeMKVThread):

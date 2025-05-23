@@ -1,7 +1,10 @@
+import logging
 import os
 import sys
 import time
 from subprocess import call
+
+from PyQt5 import QtCore
 
 if sys.platform.startswith('win'):
     import ctypes
@@ -93,11 +96,14 @@ def load_makemkv_settings() -> dict:
     return settings
 
 
-def eject(dev: str) -> None:
+@QtCore.pyqtSlot(str)
+def eject_disc(dev: str) -> None:
     """
     Eject the disc
 
     """
+
+    logging.getLogger(__name__).debug("%s - Ejecting disc", dev)
 
     if sys.platform.startswith('linux'):
         call(['eject', dev])

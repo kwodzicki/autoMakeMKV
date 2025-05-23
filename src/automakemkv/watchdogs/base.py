@@ -28,12 +28,14 @@ class BaseWatchdog(QtCore.QThread):
     """
 
     HANDLE_DISC = QtCore.pyqtSignal(str)
+    EJECT_DISC = QtCore.pyqtSignal(str)
 
     def __init__(self):
         super().__init__()
         self.log = logging.getLogger(__name__)
 
         self.HANDLE_DISC.connect(self.handle_disc)
+        self.EJECT_DISC.connect(self.handle_eject)
 
         self._outdir = None
 
@@ -45,8 +47,10 @@ class BaseWatchdog(QtCore.QThread):
         self.root = None
         self.progress_dialog = None
 
+        self._running = {}
         self._mounting = {}
         self._mounted = {}
+        self._finishing = {}
         self._monitor = None
 
     @property
@@ -57,6 +61,13 @@ class BaseWatchdog(QtCore.QThread):
     def outdir(self, val):
         self.log.info('Output directory set to : %s', val)
         self._outdir = val
+
+    @QtCore.pyqtSlot(str)
+    def handle_eject(self, dev: str):
+
+        proc = self._mounted.pop(dev, None)
+        if proc is None:
+            return
 
     def set_settings(self, **kwargs):
         """
@@ -81,27 +92,34 @@ class BaseWatchdog(QtCore.QThread):
             'convention': self.convention,
         }
 
-    def _ejecting(self, dev):
-
-        proc = self._mounted.pop(dev, None)
-        if proc is not None:
-            proc.terminate(dev)
-
     def quit(self, *args, **kwargs):
         RUNNING.set()
 
+    @QtCore.pyqtSlot(str)
     def rip_failure(self, device: str):
 
         dialog = dialogs.RipFailure(device)
         dialog.exec_()
 
+    @QtCore.pyqtSlot(str)
     def rip_success(self, device: str):
 
         dialog = dialogs.RipSuccess(device)
         dialog.exec_()
 
     @QtCore.pyqtSlot(str)
+    def rip_finished(self, hash: str):
+        obj = self._running.pop(hash, None)
+        if obj is not None:
+            obj.CANCEL.emit(hash)
+            obj.deleteLater()
+
+    @QtCore.pyqtSlot(str)
     def handle_disc(self, dev: str):
+        obj = self._mounted.pop(dev, None)
+        if obj is not None:
+            obj.CANCEL.emit(dev)
+            obj.deleteLater()
 
         obj = ripper.DiscHandler(
             dev,
@@ -116,5 +134,6 @@ class BaseWatchdog(QtCore.QThread):
 
         obj.FAILURE.connect(self.rip_failure)
         obj.SUCCESS.connect(self.rip_success)
-
+        obj.FINISHED.connect(self.rip_finished)
         self._mounted[dev] = obj
+        self._running[obj.hash] = obj

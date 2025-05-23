@@ -89,29 +89,37 @@ class Watchdog(BaseWatchdog):
         if msg == win32con.WM_DEVICECHANGE and wparam is not None:
             try:
                 dev_broadcast = win32gui_struct.UnpackDEV_BROADCAST(lparam)
-            except Exception:
+            except Exception as err:
                 pass
             else:
-                if dev_broadcast and getattr(dev_broadcast, 'devicetype', None) == win32con.DBT_DEVTYP_VOLUME:
-                    drives = self._mask_to_letters(dev_broadcast.unitmask)
-                    for dev in drives:
-                        if not self._is_cdrom(dev):
-                            continue
-
-                        if wparam != win32con.DBT_DEVICEARRIVAL:
-                            self.log.debug("%s - Eject request", dev)
-                            self._ejecting(dev)
-                            continue
-
-                        if dev in self._mounted:
-                            self.log.info("%s - Device in mounted list", dev)
-                            continue
-
-                        self.log.debug("%s - Finished mounting", dev)
-                        self._mounted[dev] = None
-                        self.HANDLE_DISC.emit(dev)
-
+                device_type = getattr(dev_broadcast, 'devicetype', None)
+                unitmask = getattr(dev_broadcast, 'unitmask', None)
+                arrival = wparam == win32con.DBT_DEVICEARRIVAL
+                self.process_device_change(device_type, unitmask, arrival)
         return win32gui.CallWindowProc(self.old_proc, hwnd, msg, wparam, lparam)
+
+    def process_device_change(self, device_type, unitmask, arrival: bool):
+        self.log.debug("Processing device change event")
+
+        if device_type != win32con.DBT_DEVTYP_VOLUME:
+            return
+        
+        drives = self._mask_to_letters(unitmask)
+        for dev in drives:
+            if not self._is_cdrom(dev):
+                continue
+
+            if not arrival:
+                self.log.debug("%s - Caught eject event", dev)
+                self.EJECT_DISC.emit(dev)
+                continue
+
+            if dev in self._mounted:
+                self.log.info("%s - Device in mounted list", dev)
+                continue
+
+            self.log.debug("%s - Finished mounting", dev)
+            self.HANDLE_DISC.emit(dev)
 
     def _mask_to_letters(self, mask):
         return [
@@ -134,6 +142,3 @@ class Watchdog(BaseWatchdog):
         """
 
         pass
-
-
-

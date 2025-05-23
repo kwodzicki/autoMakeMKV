@@ -74,7 +74,8 @@ class ProgressDialog(QtWidgets.QWidget):
 
         if len(self.widgets) == 0:
             self.setVisible(False)
-        self.adjustSize()
+        else:
+            self.adjustSize()
 
     @QtCore.pyqtSlot(str, Popen, str)
     def mkv_new_process(self, dev: str, proc: Popen, pipe: str):
@@ -100,6 +101,7 @@ class ProgressDialog(QtWidgets.QWidget):
 
     @QtCore.pyqtSlot(str)
     def cancel(self, dev):
+        self.log.info("%s - Emitting cancel event", dev)
         self.CANCEL.emit(dev)
         self.MKV_REMOVE_DISC.emit(dev)
 
@@ -357,7 +359,7 @@ class ProgressWidget(QtWidgets.QFrame):
 
         layout = self.layout()
         layout.removeWidget(self.progress)
-        self.progress.close()
+        self.progress.deleteLater()
 
         self.progress = BasicProgressWidget(self.dev, proc=proc, pipe=pipe)
 
@@ -466,7 +468,7 @@ class Metadata(QtWidgets.QWidget):
         for i in reversed(range(self._layout.count())):
             widget = self._layout.itemAt(i).widget()
             self._layout.removeWidget(widget)
-            widget.setParent(None)
+            widget.deleteLater()
 
 
 class ProgressParser(QtCore.QThread):

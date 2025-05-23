@@ -64,11 +64,11 @@ class SystemTray(QtWidgets.QSystemTrayIcon):
         settings = utils.load_settings()
 
         self.progress = progress.ProgressDialog()
-        self.ripper = disc_watchdog.Watchdog(
+        self.watchdog = disc_watchdog.Watchdog(
             self.progress,
             **settings,
         )
-        self.ripper.start()
+        self.watchdog.start()
 
         # Set up check of output directory exists to run right after event
         # loop starts
@@ -82,7 +82,7 @@ class SystemTray(QtWidgets.QSystemTrayIcon):
         self.__log.debug('opening settings')
         settings_widget = dialogs.SettingsDialog()
         if settings_widget.exec_():
-            self.ripper.set_settings(
+            self.watchdog.set_settings(
                 **settings_widget.get_settings(),
             )
 
@@ -91,12 +91,13 @@ class SystemTray(QtWidgets.QSystemTrayIcon):
         self.__log.info('Quitting program')
 
         utils.save_settings(
-            self.ripper.get_settings(),
+            self.watchdog.get_settings(),
         )
 
         if kwargs.get('force', False):
             self.__log.info('Force quit')
-            self.ripper.quit()
+            self.watchdog.quit()
+            self.watchdog.wait()
             self._app.quit()
 
         msg = QtWidgets.QMessageBox()
@@ -109,7 +110,8 @@ class SystemTray(QtWidgets.QSystemTrayIcon):
         )
         res = msg.exec_()
         if res == QtWidgets.QMessageBox.Yes:
-            self.ripper.quit()
+            self.watchdog.quit()
+            self.watchdog.wait()
             self._app.quit()
 
     def check_dirs_exists(self):
@@ -123,7 +125,7 @@ class SystemTray(QtWidgets.QSystemTrayIcon):
             'dbdir': 'Database',
         }
         for dir, lname in dirs.items():
-            val = getattr(self.ripper, dir)
+            val = getattr(self.watchdog, dir)
             if os.path.isdir(val):
                 continue
 
@@ -137,8 +139,8 @@ class SystemTray(QtWidgets.QSystemTrayIcon):
                 f'{self._name}: Select {lname} Folder',
             )
             if path != '':
-                setattr(self.ripper, dir, path)
-                settings = self.ripper.get_settings()
+                setattr(self.watchdog, dir, path)
+                settings = self.watchdog.get_settings()
                 print(settings)
                 utils.save_settings(settings)
                 continue

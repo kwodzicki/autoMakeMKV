@@ -7,6 +7,8 @@ import logging
 import os
 import shutil
 import subprocess
+import traceback
+
 from PyQt5 import QtCore
 
 from . import MKVMERGE
@@ -32,6 +34,9 @@ class DiscHandler(QtCore.QObject):
 
     FAILURE = QtCore.pyqtSignal(str)
     SUCCESS = QtCore.pyqtSignal(str)
+    FINISHED = QtCore.pyqtSignal(str)
+    CANCEL = QtCore.pyqtSignal(str)
+    EJECT_DISC = QtCore.pyqtSignal(str)
 
     def __init__(
         self,
@@ -65,6 +70,8 @@ class DiscHandler(QtCore.QObject):
 
         super().__init__()
         self.log = logging.getLogger(__name__)
+        self.CANCEL.connect(self.cancel)
+        self.EJECT_DISC.connect(utils.eject_disc)
 
         mnt = utils.dev_to_mount(dev)
 
@@ -85,9 +92,12 @@ class DiscHandler(QtCore.QObject):
         self.ripper = None
 
         self.info = None
-        self.sizes = None
 
         self.disc_lookup(self.dev)
+
+    @property
+    def hash(self) -> str | None:
+        return self.hashid or self.discid
 
     def isRunning(self):
         """
@@ -99,32 +109,30 @@ class DiscHandler(QtCore.QObject):
             return self.ripper.isRunning()
         return False
 
-        # If ripper not yet defined, still going through motions
-        # i.e., running
-        if self.ripper is None:
-            return True
-
-        # Else, return status of the ripper
-        return self.ripper.isRunning()
-
-    def terminate(self, dev: str):
+    @QtCore.pyqtSlot(str)
+    def cancel(self, dev_hash: str):
         """
         Kill/close all objects
 
         """
 
-        if dev != self.dev:
+        if dev_hash != self.dev and dev_hash != self.hash:
             return
 
         if self.options is not None:
             self.options.close()
+            self.options.deleteLater()
             self.options = None
         if self.metadata is not None:
             self.metadata.close()
+            self.metadata.deleteLater()
             self.metadata = None
         if self.ripper is not None:
-            self.ripper.terminate(self.dev)
+            self.ripper.CANCEL.emit(self.dev)
+            self.ripper.deleteLater()
             self.ripper = None
+
+        self.deleteLater()
 
     @QtCore.pyqtSlot(str)
     def disc_lookup(self, dev: str):
@@ -149,7 +157,7 @@ class DiscHandler(QtCore.QObject):
         # Get title informaiton for tracks to rip
         self.log.info("%s - UUID of disc: %s", dev, self.discid)
         self.log.info("%s - Hash of disc: %s", dev, self.hashid)
-        info, sizes = metadata.utils.load_metadata(
+        info, _ = metadata.utils.load_metadata(
             discid=self.discid,
             hashid=self.hashid,
             dbdir=self.dbdir,
@@ -162,7 +170,6 @@ class DiscHandler(QtCore.QObject):
 
         # Update mounted information and run rip_disc
         self.info = info
-        self.sizes = sizes
         self.options = metadata.ExistingDiscOptions(dev, info, self.convention)
         self.options.FINISHED.connect(self.handle_metadata)
 
@@ -206,12 +213,14 @@ class DiscHandler(QtCore.QObject):
         # Check the "return" status of the dialog
         if result == metadata.IGNORE:
             self.log.info("%s - Ignoring disc", dev)
+            self.FINISHED.emit(self.hash)
             return
 
         # Data already saved to disc by the metadata editor
         if result == metadata.SAVE:
             self.log.info("Requested metadata save and eject: %s", dev)
-            utils.eject(dev)
+            self.EJECT_DISC.emit(dev)
+            self.FINISHED.emit(self.hash)
             return
 
         if result == metadata.OPEN:
@@ -222,14 +231,13 @@ class DiscHandler(QtCore.QObject):
         # the user edited/updated something
         if self.metadata is not None:
             self.info = self.metadata.info
-            self.sizes = self.metadata.sizes
 
         # Initialize ripper object
         if result == metadata.RIP:
             self.ripper = Ripper(
                 dev,
+                self.hashid or self.discid,
                 self.info,
-                self.sizes,
                 self.outdir,
                 self.everything,
                 self.extras,
@@ -238,6 +246,7 @@ class DiscHandler(QtCore.QObject):
             )
             self.ripper.FAILURE.connect(self.FAILURE.emit)
             self.ripper.SUCCESS.connect(self.SUCCESS.emit)
+            self.ripper.FINISHED.connect(self.FINISHED.emit)
             self.ripper.start()
             return
 
@@ -248,12 +257,15 @@ class Ripper(QtCore.QThread):
 
     FAILURE = QtCore.pyqtSignal(str)
     SUCCESS = QtCore.pyqtSignal(str)
+    FINISHED = QtCore.pyqtSignal(str)
+    EJECT_DISC = QtCore.pyqtSignal(str)
+    CANCEL = QtCore.pyqtSignal(str)
 
     def __init__(
         self,
         dev: str,
+        hash: str,
         info: dict,
-        sizes: dict,
         outdir: str,
         everything: bool,
         extras: bool,
@@ -263,18 +275,29 @@ class Ripper(QtCore.QThread):
 
         super().__init__()
         self.log = logging.getLogger(__name__)
+        self.EJECT_DISC.connect(utils.eject_disc)
+        self.CANCEL.connect(self.cancel)
 
         self._dead = False
+        self._cancelled = False
+    
         self.mkv_thread = None
         self.mkv_thread_title = None
         self.dev = dev
+        self.hash = hash
         self.info = info
-        self.sizes = sizes
         self.outdir = outdir
         self.everything = everything
         self.extras = extras
         self.convention = convention
         self.progress = progress
+        if self.progress is not None:
+            self.progress.CANCEL.connect(self.cancel)
+            self.progress.CANCEL.connect(makemkv.MakeMKVRip.CANCEL.emit)
+
+            # self.EJECT_DISC.connect(
+            #     self.progress.MKV_REMOVE_DISC.emit
+            # )
 
         # To handle windows mount points, use drive split. Will be
         # empty on linux/mac
@@ -285,8 +308,13 @@ class Ripper(QtCore.QThread):
             tmpdir = drive.rstrip(":") + "_drive"
         self.tmpdir = os.path.join(outdir, tmpdir)
 
-        if self.progress is not None:
-            self.progress.CANCEL.connect(self.terminate)
+    @property
+    def cancelled(self) -> bool:
+        return self._cancelled
+
+    @property
+    def dead(self) -> bool:
+        return self._dead
 
     def rip(self):
 
@@ -357,7 +385,7 @@ class Ripper(QtCore.QThread):
         )
         self.mkv_thread.FAILURE.connect(self.FAILURE.emit)
         self.mkv_thread.SUCCESS.connect(self.SUCCESS.emit)
-        self.mkv_thread.start()
+        self.mkv_thread.makemkvcon()
 
         if self.progress is not None:
             self.progress.MKV_CUR_TRACK.emit(self.dev, title)
@@ -368,7 +396,12 @@ class Ripper(QtCore.QThread):
                 self.mkv_thread.pipe,
             )
 
-        self.mkv_thread.wait()
+        self.mkv_thread.monitor_proc()
+
+        self.EJECT_DISC.emit(self.dev)
+        # # Remove progress widget
+        # if self.progress is not None:
+        #     self.progress.MKV_REMOVE_DISC.emit(self.dev)
 
         files = [
             os.path.join(self.tmpdir, item)
@@ -459,6 +492,7 @@ class Ripper(QtCore.QThread):
         )
         self.mkv_thread.FAILURE.connect(self.FAILURE.emit)
         self.mkv_thread.SUCCESS.connect(self.SUCCESS.emit)
+
         self.mkv_thread.start()
 
         if self.progress is not None:
@@ -472,6 +506,12 @@ class Ripper(QtCore.QThread):
             )
         self.mkv_thread.wait()
 
+        self.EJECT_DISC.emit(self.dev)
+
+        # Remove full-disc progress widget
+        # if self.progress is not None:
+        #     self.progress.MKV_REMOVE_DISC.emit(self.dev)
+
         if self.mkv_thread.returncode != 0 or self.mkv_thread.failure:
             self.log.warning("%s - Error backing up disc", self.dev)
             try:
@@ -480,13 +520,11 @@ class Ripper(QtCore.QThread):
                 shutil.rmtree(tmppath)
             except FileNotFoundError:
                 pass
-            os.rmdir(self.tmpdir)
             self.log.debug("%s - Removed dir: %s", self.dev, self.tmpdir)
             return False
 
-        # Remove the full-disc progress widget, then re-add not-full-disk
+        # Add not-full-disk
         if self.progress is not None:
-            self.progress.MKV_REMOVE_DISC.emit(self.dev)
             self.progress.MKV_ADD_DISC.emit(self.dev, self.info, False)
 
         # Run title extration based on the media_type
@@ -494,8 +532,6 @@ class Ripper(QtCore.QThread):
             self.extract_titles_from_dvd_iso(paths, tmppath)
         else:
             self.extract_titles_from_bluray_iso(paths, tmppath)
-
-        return True
 
         # Attempt to remove the backup (tmp) file
         if os.path.isdir(tmppath):
@@ -516,6 +552,8 @@ class Ripper(QtCore.QThread):
                     tmppath,
                     err,
                 )
+ 
+        return True
 
     def extract_titles_from_bluray_iso(self, paths: dict, src: str) -> None:
         """
@@ -553,6 +591,9 @@ class Ripper(QtCore.QThread):
 
         # Iterate over all titles/output files to rip
         for title, output in paths.items():
+            if self._cancelled:
+                return
+
             # Set current track on progress if defined
             if self.progress is not None:
                 self.progress.MKV_CUR_TRACK.emit(self.dev, title)
@@ -622,6 +663,9 @@ class Ripper(QtCore.QThread):
         """
 
         for title, output in paths.items():
+            if self._cancelled:
+                return
+
             # If progress is set, then update current track
             if self.progress is not None:
                 self.progress.MKV_CUR_TRACK.emit(self.dev, title)
@@ -693,33 +737,40 @@ class Ripper(QtCore.QThread):
 
         """
 
-        result = self.rip()
+        self._finished = self.rip()
 
-        if result:
-            try:
-                os.rmdir(self.tmpdir)
-            except Exception as err:
-                self.log.info(
-                    "%s - Failed to remove directory: %s",
-                    self.dev,
-                    err,
-                )
+        try:
+            os.rmdir(self.tmpdir)
+        except Exception as err:
+            self.log.info(
+                "%s - Failed to remove directory: %s",
+                self.dev,
+                err,
+            )
 
-        if self.progress is not None:
-            self.progress.MKV_REMOVE_DISC.emit(self.dev)
         self.log.info("%s - Ripper thread finished", self.dev)
+        self.FINISHED.emit(self.dev)
 
     @QtCore.pyqtSlot(str)
-    def terminate(self, dev):
-        if dev != self.dev:
+    def cancel(self, dev: str):
+
+        if dev!= self.dev:
             return
 
-        self._dead = True
-        if self.mkv_thread is None:
-            return
-
-        self.log.info("%s - Terminating rip", dev)
-        self.mkv_thread.terminate()
+        self._cancelled = True
+        self.log.info("%s - Cancelling rip", dev)
+        if self.mkv_thread is not None:
+            self.log.info('%s - Emitting: %s', dev, self.mkv_thread.mkv_id)
+            # self.mkv_thread.cancel(self.mkv_thread.source)
+            # print(">>> CANCEL.emit() called")
+            # print(f"Signal object ID: {id(self.mkv_thread.CANCEL)}")
+            # print(f"Owner ID: {id(self.mkv_thread)}")
+            self.mkv_thread.CANCEL.emit(self.mkv_thread.mkv_id)
+            # traceback.print_stack()
+        if self.mkv_thread_title is not None:
+            self.mkv_thread_title.CANCEL.emit(self.mkv_thread_title.source)
+        print('done with cancel')
+        
 
 
 def directory_size(path):

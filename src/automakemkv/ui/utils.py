@@ -66,11 +66,12 @@ def save_settings(settings: dict) -> None:
 
 
 def load_metadata(
+    dev: str,
     discid: str | None = None,
     hashid: str | None = None,
     fpath: str | None = None,
     dbdir: str | None = None,
-) -> tuple:
+) -> dict:
     """
     Load data from given disc or file
 
@@ -80,45 +81,38 @@ def load_metadata(
     dbdir = dbdir or DBDIR
 
     if fpath is None:
-        fpath = db_migrate(discid, hashid, dbdir)
+        fpath = db_migrate(dev, discid, hashid, dbdir)
 
-    log.debug("Path to database file : %s", fpath)
-    if not os.path.isfile(fpath):
-        return None, None
-
-    with open(fpath, 'r') as fid:
-        info = json.load(fid)
-
-    infopath = os.path.splitext(fpath)[0] + INFO_EXT
-    with gzip.open(infopath, 'rt') as fid:
-        data = fid.read()
-
-    sizes = {
-        matchobj.group(1): int(matchobj.group(2))
-        for matchobj in TRACKSIZE_REG.finditer(data)
-    }
-    return info, sizes
+    log.debug("%s - Path to database file : %s", dev, fpath)
+    if os.path.isfile(fpath):
+        with open(fpath, 'r') as fid:
+            return json.load(fid)
 
 
-def db_migrate(discid: str | None, hashid: str, dbdir: str | None):
+def db_migrate(
+    dev: str,
+    discid: str | None,
+    hashid: str,
+    dbdir: str | None,
+) -> str:
 
     log = logging.getLogger(__name__)
     if discid is None:
-        log.debug("No 'discid', using new hash")
+        log.debug("%s - No 'discid', using new hash", dev)
         return file_from_id(hashid, dbdir)
 
     old_path = file_from_id(discid, dbdir)
     new_path = file_from_id(hashid, dbdir)
 
     if not os.path.isfile(old_path):
-        log.debug("No old metadata to migrate, using new hash")
+        log.debug("%s - No old metadata to migrate, using new hash", dev)
         return new_path
 
     if os.path.isfile(new_path):
-        log.debug("New hash exists, using it")
+        log.debug("%s - New hash exists, using it", dev)
         return new_path
 
-    log.debug("Migrating data: %s --> %s", old_path, new_path)
+    log.debug("%s - Migrating data: %s --> %s", dev, old_path, new_path)
     old_infopath = os.path.splitext(old_path)[0] + INFO_EXT
     new_infopath = os.path.splitext(new_path)[0] + INFO_EXT
     shutil.copy(old_infopath, new_infopath)

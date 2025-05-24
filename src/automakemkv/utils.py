@@ -1,13 +1,6 @@
-import logging
 import os
 import sys
 import time
-from subprocess import call
-
-from PyQt5 import QtCore
-
-if sys.platform.startswith('win'):
-    import ctypes
 
 from . import UUID_ROOT, LABEL_ROOT, HOMEDIR
 
@@ -94,21 +87,3 @@ def load_makemkv_settings() -> dict:
             settings[key.strip()] = val.strip().strip('"')
 
     return settings
-
-
-@QtCore.pyqtSlot(str)
-def eject_disc(dev: str) -> None:
-    """
-    Eject the disc
-
-    """
-
-    logging.getLogger(__name__).debug("%s - Ejecting disc", dev)
-
-    if sys.platform.startswith('linux'):
-        call(['eject', dev])
-    elif sys.platform.startswith('win'):
-        command = f"open {dev}: type CDAudio alias drive"
-        ctypes.windll.winmm.mciSendStringW(command, None, 0, None)
-        ctypes.windll.winmm.mciSendStringW("set drive door open", None, 0, None)
-        ctypes.windll.winmm.mciSendStringW("close drive", None, 0, None)

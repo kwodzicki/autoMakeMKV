@@ -13,8 +13,6 @@ import win32file
 import win32gui
 import win32gui_struct
 
-from .. import UUID_ROOT, OUTDIR, DBDIR
-
 from . import RUNNING
 from .base import BaseWatchdog
 
@@ -33,16 +31,7 @@ class Watchdog(BaseWatchdog):
 
     """
 
-    def __init__(
-        self,
-        progress_dialog,
-        outdir: str = OUTDIR,
-        everything: bool = False,
-        extras: bool = False,
-        convention: str = 'video_utils',
-        root: str = UUID_ROOT,
-        **kwargs,
-    ):
+    def __init__(self, *args, **kwargs):
         """
         Arguments:
             outdir (str) : Top-level directory for ripping files
@@ -61,24 +50,11 @@ class Watchdog(BaseWatchdog):
 
         """
 
-        super().__init__()
+        super().__init__(*args, **kwargs)
         self.log = logging.getLogger(__name__)
 
-        self.dbdir = kwargs.get('dbdir', DBDIR)
-        self.outdir = outdir
-        self.everything = everything
-        self.extras = extras
-        self.convention = convention
-        self.root = root
-        self.progress_dialog = progress_dialog
-
-        # Use invisible QWidget to obtain an HWND
-        self.hidden_window = QtWidgets.QWidget()
-        self.hidden_window.setWindowFlags(QtCore.Qt.Widget | QtCore.Qt.Tool)
-        self.hidden_window.hide()
-
-        # Subclass native winEventProc
-        self.hwnd = int(self.hidden_window.winId())
+        # Subclass native winEventProc using the progress widget
+        self.hwnd = int(self.progress.winId())
         self.old_proc = win32gui.SetWindowLong(
             self.hwnd,
             win32con.GWL_WNDPROC,
@@ -99,8 +75,6 @@ class Watchdog(BaseWatchdog):
         return win32gui.CallWindowProc(self.old_proc, hwnd, msg, wparam, lparam)
 
     def process_device_change(self, device_type, unitmask, arrival: bool):
-        self.log.debug("Processing device change event")
-
         if device_type != win32con.DBT_DEVTYP_VOLUME:
             return
         
@@ -111,7 +85,7 @@ class Watchdog(BaseWatchdog):
 
             if not arrival:
                 self.log.debug("%s - Caught eject event", dev)
-                self.EJECT_DISC.emit(dev)
+                # self.HANDLE_EJECT.emit(dev)
                 continue
 
             if dev in self._mounted:
@@ -119,7 +93,7 @@ class Watchdog(BaseWatchdog):
                 continue
 
             self.log.debug("%s - Finished mounting", dev)
-            self.HANDLE_DISC.emit(dev)
+            self.HANDLE_INSERT.emit(dev)
 
     def _mask_to_letters(self, mask):
         return [

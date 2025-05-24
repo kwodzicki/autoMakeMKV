@@ -417,6 +417,7 @@ class DiscHandler(QtCore.QObject):
                 self.extractor = ExtractFromBluRay(
                     self.backup_path,
                     self.paths,
+                    self.info,
                     self.progress
                 )
             self.extractor.FINISHED.connect(self.extract_title)
@@ -821,7 +822,7 @@ class ExtractFromBluRay(QtCore.QThread):
 
     FINISHED = QtCore.pyqtSignal(str)
 
-    def __init__(self, src: str, paths: dict, progress):
+    def __init__(self, src: str, paths: dict, info: dict, progress):
         """
         Rip titles from Blu-Ray backup directory
 
@@ -847,10 +848,12 @@ class ExtractFromBluRay(QtCore.QThread):
 
         super().__init__()
 
+        self.log = logging.getLogger(__name__)
         self._result = None
 
         self.src = src
         self.paths = paths
+        self.info = info
         self.progress = progress
         self.title = tuple(self.paths.keys())[0]
 
@@ -893,15 +896,12 @@ class ExtractFromBluRay(QtCore.QThread):
             )
             return
 
-        # Set current track on progress if defined
-        self.progress.MKV_CUR_TRACK.emit(self.src, self.title)
-
         # Try to get the source playlist/stream for the title
         title_src = (
             self
             .info
             .get('titles', {})
-            .get(title, {})
+            .get(self.title, {})
             .get('Source FileName', None)
         )
         if title_src is None:
@@ -932,12 +932,16 @@ class ExtractFromBluRay(QtCore.QThread):
             cmd.extend(lang_opts)
         cmd.append(title_src)
 
+
         self.log.debug("%s - Running command: %s", self.src, cmd)
         self.proc = subprocess.Popen(
             cmd,
             stdout=subprocess.PIPE,
             universal_newlines=True,
         )
+
+        # Set current track on progress
+        self.progress.MKV_CUR_TRACK.emit(self.src, self.title)
         self.progress.MKV_NEW_PROCESS.emit(self.src, self.proc, 'stdout')
         self.proc.wait()
 

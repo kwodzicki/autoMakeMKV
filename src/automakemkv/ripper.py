@@ -6,8 +6,8 @@ Utilities for ripping titles
 import logging
 import os
 import shutil
+import time
 import subprocess
-import traceback
 
 from PyQt5 import QtCore
 
@@ -32,11 +32,13 @@ class DiscHandler(QtCore.QObject):
 
     """
 
-    FAILURE = QtCore.pyqtSignal(str)
-    SUCCESS = QtCore.pyqtSignal(str)
-    FINISHED = QtCore.pyqtSignal(str)
-    CANCEL = QtCore.pyqtSignal(str)
-    EJECT_DISC = QtCore.pyqtSignal(str)
+    FAILURE = QtCore.pyqtSignal()
+    SUCCESS = QtCore.pyqtSignal()
+    FINISHED = QtCore.pyqtSignal()
+    EJECT_DISC = QtCore.pyqtSignal()
+
+    DISC_METADATA_DIALOG = QtCore.pyqtSignal(bool)
+    EXTRACT_TITLE = QtCore.pyqtSignal(str)
 
     def __init__(
         self,
@@ -47,7 +49,7 @@ class DiscHandler(QtCore.QObject):
         convention: str,
         dbdir: str,
         root: str,
-        progress_dialog,
+        progress,
         **kwargs,
     ):
         """
@@ -70,30 +72,51 @@ class DiscHandler(QtCore.QObject):
 
         super().__init__()
         self.log = logging.getLogger(__name__)
-        self.CANCEL.connect(self.cancel)
-        self.EJECT_DISC.connect(utils.eject_disc)
 
-        mnt = utils.dev_to_mount(dev)
+        self.DISC_METADATA_DIALOG.connect(self.disc_metadata_dialog)
+        self.EXTRACT_TITLE.connect(self.extract_title)
+
+        self._cancelled = False
+        self.backup_path = None
+        self.paths = {}
 
         self.dev = dev
-        self.discid = utils.get_discid(dev, root)
-        self.hashid = disc_hash.get_hash(mnt)
-
         self.outdir = outdir
         self.everything = everything
         self.extras = extras
         self.dbdir = dbdir
         self.root = root
         self.convention = convention
-        self.progress_dialog = progress_dialog
+        self.progress = progress
+        self.progress.CANCEL.connect(self.cancel)
 
         self.options = None
         self.metadata = None
         self.ripper = None
+        self.extractor = None
 
         self.info = None
 
-        self.disc_lookup(self.dev)
+        # To handle windows mount points, use drive split. Will be
+        # empty on linux/mac. Append monotonic time to directory to
+        # help ensure not collisions
+        drive, tail = os.path.splitdrive(dev)
+        if drive == '':
+            tmpdir = os.path.basename(dev)
+        else:
+            tmpdir = drive.rstrip(":") + "_drive"
+        tmpdir = f"{tmpdir}_{time.monotonic_ns()}"
+        self.tmpdir = os.path.join(outdir, tmpdir)
+
+        self.discid = utils.get_discid(dev, root)  # This is pretty quick
+
+        # We compute disc hash in thread to keep the GUI alive.
+        # When finished will trigger the disc_lookup method,
+        # passing in the disc hash 
+        mnt = utils.dev_to_mount(dev)
+        self.hashid = disc_hash.DiscHasher(mnt)
+        self.hashid.FINISHED.connect(self.disc_lookup)
+        self.hashid.start()
 
     @property
     def hash(self) -> str | None:
@@ -110,32 +133,33 @@ class DiscHandler(QtCore.QObject):
         return False
 
     @QtCore.pyqtSlot(str)
-    def cancel(self, dev_hash: str):
+    def cancel(self, dev: str):
         """
         Kill/close all objects
 
+        This needs to accept a dev variable becasue the signal that
+        triggers it comes from the main progress widget, which is not tied
+        to a specific dev, but rather tracks a collection of progress
+        widgets. These widgets are tracked by the source of the MakeMKV
+        command; a disc/dev or a backup file. This is what is passed here
+        and used to check that we are trying to cancel the correct object.
+
         """
 
-        if dev_hash != self.dev and dev_hash != self.hash:
+        if dev != self.dev and dev != self.backup_path:
             return
 
-        if self.options is not None:
-            self.options.close()
-            self.options.deleteLater()
-            self.options = None
-        if self.metadata is not None:
-            self.metadata.close()
-            self.metadata.deleteLater()
-            self.metadata = None
+        self._cancelled = True
         if self.ripper is not None:
-            self.ripper.CANCEL.emit(self.dev)
-            self.ripper.deleteLater()
-            self.ripper = None
+            self.log.debug("%s - Cancelling ripper", dev)
+            self.ripper.CANCEL.emit()
 
-        self.deleteLater()
+        if self.extractor is not None:
+            self.log.debug("%s - Cancelling extractor", dev)
+            self.extractor.CANCEL.emit()
 
     @QtCore.pyqtSlot(str)
-    def disc_lookup(self, dev: str):
+    def disc_lookup(self, hashid: str):
         """
         Get information about a disc
 
@@ -147,17 +171,21 @@ class DiscHandler(QtCore.QObject):
 
         """
 
-        if dev != self.dev:
-            return
+        self.hashid.wait()  # Should be quick as FINISHED is at end of thread
+        self.hashid.deleteLater()
+
+        # If hash is an emtpy string, then ensure that attribute is None
+        self.hashid = hashid if hashid != '' else None
 
         if self.discid is None and self.hashid is None:
-            self.log.info("%s - No UUID found or hash for disc, ignoring", dev)
+            self.log.info("%s - No UUID found or hash for disc, ignoring", self.dev)
             return
 
         # Get title informaiton for tracks to rip
-        self.log.info("%s - UUID of disc: %s", dev, self.discid)
-        self.log.info("%s - Hash of disc: %s", dev, self.hashid)
-        info, _ = metadata.utils.load_metadata(
+        self.log.info("%s - UUID of disc: %s", self.dev, self.discid)
+        self.log.info("%s - Hash of disc: %s", self.dev, self.hashid)
+        info = metadata.utils.load_metadata(
+            self.dev,
             discid=self.discid,
             hashid=self.hashid,
             dbdir=self.dbdir,
@@ -165,31 +193,28 @@ class DiscHandler(QtCore.QObject):
 
         # Open dics metadata GUI and register "callback" for when closes
         if info is None:
-            self.disc_metadata_dialog(dev, False)
+            self.DISC_METADATA_DIALOG.emit(False)
             return
 
         # Update mounted information and run rip_disc
         self.info = info
-        self.options = metadata.ExistingDiscOptions(dev, info, self.convention)
+        self.options = metadata.ExistingDiscOptions(self.dev, info, self.convention)
         self.options.FINISHED.connect(self.handle_metadata)
 
-    @QtCore.pyqtSlot(str, bool)
-    def disc_metadata_dialog(self, dev: str, load_existing: bool = False):
-
-        if dev != self.dev:
-            return
+    @QtCore.pyqtSlot(bool)
+    def disc_metadata_dialog(self, load_existing: bool = False):
 
         # Open dics metadata GUI and register "callback" for when closes
         self.metadata = metadata.DiscMetadataEditor(
-            dev,
+            self.dev,
             self.hashid,
             self.dbdir,
             load_existing=load_existing,
         )
         self.metadata.FINISHED.connect(self.handle_metadata)
 
-    @QtCore.pyqtSlot(str, int)
-    def handle_metadata(self, dev: str, result: int):
+    @QtCore.pyqtSlot(int)
+    def handle_metadata(self, result: int) -> None:
         """
         Rip a whole disc
 
@@ -207,116 +232,46 @@ class DiscHandler(QtCore.QObject):
 
         """
 
-        if dev != self.dev:
-            return
+        # Clean up any windows that are hanging around
+        if self.options is not None:
+            # Get convention from window; we update the attribute because
+            # if they changed it and then opened to edit metadata, the selection
+            # would be lost.
+            self.convention = self.options.convention
+            self.log.debug("%s - Cleaning up the options window", self.dev)
+            self.options.deleteLater()
+            self.options = None
 
         # Check the "return" status of the dialog
         if result == metadata.IGNORE:
-            self.log.info("%s - Ignoring disc", dev)
-            self.FINISHED.emit(self.hash)
+            self.log.info("%s - Ignoring disc", self.dev)
+            self.FINISHED.emit()
+            return
+
+        # If we are OPENING the disc info for editing
+        if result == metadata.OPEN:
+            self.DISC_METADATA_DIALOG.emit(True)
             return
 
         # Data already saved to disc by the metadata editor
         if result == metadata.SAVE:
-            self.log.info("Requested metadata save and eject: %s", dev)
-            self.EJECT_DISC.emit(dev)
-            self.FINISHED.emit(self.hash)
-            return
-
-        if result == metadata.OPEN:
-            self.disc_metadata_dialog(dev, True)
+            self.log.info("%s - Requested metadata save and eject", self.dev)
+            self.EJECT_DISC.emit()
+            self.FINISHED.emit()
             return
 
         # If metadata attribute is not None, then must be new disc or
         # the user edited/updated something
         if self.metadata is not None:
+            self.log.debug("%s - Cleaning up the metadata window", self.dev)
             self.info = self.metadata.info
+            self.metadata.deleteLater()
+            self.metadata = None
 
         # Initialize ripper object
-        if result == metadata.RIP:
-            self.ripper = Ripper(
-                dev,
-                self.hashid or self.discid,
-                self.info,
-                self.outdir,
-                self.everything,
-                self.extras,
-                self.options.convention,
-                self.progress_dialog,
-            )
-            self.ripper.FAILURE.connect(self.FAILURE.emit)
-            self.ripper.SUCCESS.connect(self.SUCCESS.emit)
-            self.ripper.FINISHED.connect(self.FINISHED.emit)
-            self.ripper.start()
+        if result != metadata.RIP:
+            self.log.error("%s - Unrecognized option: %d", self.dev, result)
             return
-
-        self.log.error("Unrecognized option: %d", result)
-
-
-class Ripper(QtCore.QThread):
-
-    FAILURE = QtCore.pyqtSignal(str)
-    SUCCESS = QtCore.pyqtSignal(str)
-    FINISHED = QtCore.pyqtSignal(str)
-    EJECT_DISC = QtCore.pyqtSignal(str)
-    CANCEL = QtCore.pyqtSignal(str)
-
-    def __init__(
-        self,
-        dev: str,
-        hash: str,
-        info: dict,
-        outdir: str,
-        everything: bool,
-        extras: bool,
-        convention: str,
-        progress,
-    ):
-
-        super().__init__()
-        self.log = logging.getLogger(__name__)
-        self.EJECT_DISC.connect(utils.eject_disc)
-        self.CANCEL.connect(self.cancel)
-
-        self._dead = False
-        self._cancelled = False
-    
-        self.mkv_thread = None
-        self.mkv_thread_title = None
-        self.dev = dev
-        self.hash = hash
-        self.info = info
-        self.outdir = outdir
-        self.everything = everything
-        self.extras = extras
-        self.convention = convention
-        self.progress = progress
-        if self.progress is not None:
-            self.progress.CANCEL.connect(self.cancel)
-            self.progress.CANCEL.connect(makemkv.MakeMKVRip.CANCEL.emit)
-
-            # self.EJECT_DISC.connect(
-            #     self.progress.MKV_REMOVE_DISC.emit
-            # )
-
-        # To handle windows mount points, use drive split. Will be
-        # empty on linux/mac
-        drive, tail = os.path.splitdrive(dev)
-        if drive == '':
-            tmpdir = os.path.basename(dev)
-        else:
-            tmpdir = drive.rstrip(":") + "_drive"
-        self.tmpdir = os.path.join(outdir, tmpdir)
-
-    @property
-    def cancelled(self) -> bool:
-        return self._cancelled
-
-    @property
-    def dead(self) -> bool:
-        return self._dead
-
-    def rip(self):
 
         if self.info is None:
             self.log.error("%s - No title information found/entered", self.dev)
@@ -326,20 +281,23 @@ class Ripper(QtCore.QThread):
             self.log.info("%s - Just saving metadata, not ripping", self.dev)
             return
 
-        paths = dict(
-            path_utils.outfile(
-                self.outdir,
-                self.info,
-                everything=self.everything,
-                extras=self.extras,
-                convention=self.convention,
+        # Get all paths to output files created during rip
+        self.paths.update(
+            dict(
+                path_utils.outfile(
+                    self.outdir,
+                    self.info,
+                    everything=self.everything,
+                    extras=self.extras,
+                    convention=self.convention,
+                )
             )
         )
 
         # Get list of all titles in the info dict
         title_nums = list(self.info['titles'].keys())
         for title in title_nums:
-            if title not in paths:
+            if title not in self.paths:
                 _ = self.info['titles'].pop(title)
 
         self.log.debug(
@@ -349,13 +307,172 @@ class Ripper(QtCore.QThread):
         )
         os.makedirs(self.tmpdir, exist_ok=True)
 
-        if len(paths) == 1:
-            title, output = list(paths.items())[0]
-            return self.rip_title(title, output)
+        # Set up ripper based on single or multi-title rip
+        # The FINISHED signal processing is specific to type
+        # of rip
+        if len(self.paths) == 1:
+            title, output = list(self.paths.items())[0]
+            self.ripper = RipTitle(
+                self.dev,
+                title,
+                self.info,
+                output,
+                self.tmpdir,
+                self.progress,
+            )
+        else:
+            self.ripper = RipDisc(
+                self.dev,
+                self.info,
+                self.tmpdir,
+                self.progress,
+            )
 
-        return self.rip_disc(paths)
+        # These signals are the same for both rip types
+        self.ripper.FAILURE.connect(self.FAILURE.emit)
+        self.ripper.SUCCESS.connect(self.SUCCESS.emit)
+        self.ripper.EJECT_DISC.connect(self.EJECT_DISC.emit)
+        self.ripper.FINISHED.connect(self.rip_finished)
 
-    def rip_title(self, title: str, output: str):
+        # Start the thread
+        self.ripper.start()        
+
+    @QtCore.pyqtSlot(str)
+    def rip_finished(self, backup_path: str) -> None:
+        """
+        Handle cleanup/title extraction after rip
+
+        If extracting only one title from the disc, then we just clean
+        up some objects and emit a FINISHED signal. Otherwise, we need
+        to extract titles from the disc backup, and so we set up an
+        extractor instance and get that started.
+
+        Arguments:
+            backup_path (str): Full path to the backup of the disc to extract
+                titles from
+ 
+        """
+        
+        self.ripper.wait()  # This "shouldn't" take too long
+        success = self.ripper.result
+        self.progress.MKV_REMOVE_DISC.emit(self.dev)
+        if success:
+            # If RipTitle instance, then we are done
+            if isinstance(self.ripper, RipTitle):
+                self.FINISHED.emit()
+            else:
+                self.backup_path = backup_path
+                self.progress.MKV_ADD_DISC.emit(backup_path, self.info, False)
+                self.EXTRACT_TITLE.emit('')
+
+        self.log.debug("%s - Cleaning up the ripper thread", self.dev)
+        self.ripper.deleteLater()
+        self.ripper = None
+
+        # IF failed, then emit FINISHED for cleanup
+        if not success:
+            try:
+                os.rmdir(self.tmpdir)
+            except Exception:
+                pass
+            self.FINISHED.emit()
+    
+    @QtCore.pyqtSlot(str)
+    def extract_title(self, previous_output: str) -> None:
+        """
+        Handle title extraction from backup
+
+        When extracting multiple titles from a disc, a full backup
+        is done to reduce the overhead of multiple set-up scans of
+        the disc. So, after backup is done, this method is triggered
+        to start extraction of each title in sequence. This is done
+        by connecting the FINISHED signal of each extraction object
+        back to this method so that after each one finishes, we
+        retrigger this method to extract the next one.
+
+        Arguments:
+            previous_output (str): Full path of output file from previous
+                rip or extraction. This is not used except for callback
+                from full disc rip
+
+        """
+
+        # If the extractor is defined, then ensure is stopped and delete
+        if self.extractor is not None:
+            self.extractor.wait()
+            self.extractor.deleteLater()
+
+        # If there are still titles to extract (paths left) AND we have
+        # not had a cancel event
+        if len(self.paths) > 0 and not self._cancelled:
+            # Run title extration based on the media_type
+            if self.info.get('media_type', '') == 'DVD':
+                self.extractor = ExtractFromDVD(
+                    self.backup_path,
+                    self.paths,
+                    self.tmpdir,
+                    self.progress,
+                )
+            else:
+                self.extractor = ExtractFromBluRay(
+                    self.backup_path,
+                    self.paths,
+                    self.progress
+                )
+            self.extractor.FINISHED.connect(self.extract_title)
+            self.extractor.start()
+
+            return
+
+        # If made here, then all extractions have finished OR cancelled
+        self.extractor = None
+        self.progress.MKV_REMOVE_DISC.emit(self.backup_path)
+
+        self.log.debug(
+            "%s - Removing temporary directory: %s",
+            self.dev,
+            self.tmpdir,
+        )
+
+        # Attempt to remove the backup (tmp) file
+        if os.path.isdir(self.tmpdir):
+            try:
+                shutil.rmtree(self.tmpdir)
+            except Exception as err:
+                self.log.warning(
+                    "Failed to remove directory '%s': %s",
+                    self.tmpdir,
+                    err,
+                )
+        elif os.path.isfile(self.tmpdir):
+            try:
+                os.remove(self.tmpdir)
+            except Exception as err:
+                self.log.warning(
+                    "Failed to remove file '%s': %s",
+                    self.tmpdir,
+                    err,
+                )
+
+        # Emit FINISHED to ensure cleanup of the object
+        self.FINISHED.emit()
+
+
+class RipTitle(makemkv.MakeMKVRip):
+    """
+    Extract a single title from disc
+
+    """
+
+    def __init__(
+        self,
+        dev: str,
+        title: str,
+        info: dict,
+        fname: str,
+        tmpdir: str,
+        progress,
+    ):
         """
         Rip a given title from a disc
 
@@ -365,51 +482,66 @@ class Ripper(QtCore.QThread):
         Arguments:
             title (str) : Title to rip
             output (str) : Name of the output file
+            info (dict): Info about tracks on the disc; needed
+                for progress window
 
         Returns:
             bool : True if ripped, False otherwise
 
         """
 
-        self.log.debug('%s - Running rip title', self.dev)
-
-        if self.progress is not None:
-            self.progress.MKV_ADD_DISC.emit(self.dev, self.info, False)
-
-        self.log.info("[%s - %s] Ripping track", self.dev, title)
-        self.mkv_thread = makemkv.MakeMKVRip(
+        super().__init__(
             'mkv',
-            dev=self.dev,
+            dev=dev,
             title=title,
-            output=self.tmpdir,
+            output=tmpdir,
         )
-        self.mkv_thread.FAILURE.connect(self.FAILURE.emit)
-        self.mkv_thread.SUCCESS.connect(self.SUCCESS.emit)
-        self.mkv_thread.makemkvcon()
 
-        if self.progress is not None:
-            self.progress.MKV_CUR_TRACK.emit(self.dev, title)
-            self.mkv_thread.started.wait()
-            self.progress.MKV_NEW_PROCESS.emit(
-                self.dev,
-                self.mkv_thread.proc,
-                self.mkv_thread.pipe,
+        self.fname = fname
+        self.progress = progress
+        self.progress.MKV_ADD_DISC.emit(self.dev, info, False)
+
+    def run(self):
+        """Run in thread"""
+
+        try:
+            self._result = self.rip()
+        except Exception as err:
+            self.log.exception(
+                "%s - Failed to rip title: %s",
+                self.source[1],
+                err,
             )
+        self.FINISHED.emit(self.fname)
 
-        self.mkv_thread.monitor_proc()
+    def rip(self):
 
-        self.EJECT_DISC.emit(self.dev)
-        # # Remove progress widget
-        # if self.progress is not None:
-        #     self.progress.MKV_REMOVE_DISC.emit(self.dev)
+        self.log.info("[%s - %s] Ripping rip title", self.dev, self.title)
+        self.makemkvcon()  # Start process for rip/extract
 
+        # Set up a progress widget
+        self.progress.MKV_CUR_TRACK.emit(self.dev, self.title)
+        self.progress.MKV_NEW_PROCESS.emit(
+            self.dev,
+            self.proc,
+            self.pipe,
+        )
+
+        # Wait for process to finish
+        self.monitor_proc()
+
+        # Eject the disc
+        self.EJECT_DISC.emit()
+
+        # Get listing of files in output directory
         files = [
-            os.path.join(self.tmpdir, item)
-            for item in os.listdir(self.tmpdir)
+            os.path.join(self.output, item)
+            for item in os.listdir(self.output)
             if item.endswith('.mkv')
         ]
 
-        if self.mkv_thread.returncode != 0 or self.mkv_thread.failure:
+        # If bad return code or failure
+        if self.returncode != 0 or self.failure:
             fdirs = []
             for fname in files:
                 fdir = os.path.dirname(fname)
@@ -425,7 +557,7 @@ class Ripper(QtCore.QThread):
 
             self.log.error(
                 "Error ripping track '%s' from '%s'",
-                title,
+                self.title,
                 self.dev,
             )
             return False
@@ -447,19 +579,71 @@ class Ripper(QtCore.QThread):
             "%s - Renaming file '%s' ---> '%s'",
             self.dev,
             files[0],
-            output,
+            self.fname,
         )
         # Ensure output directory exists
         os.makedirs(
-            os.path.dirname(output),
+            os.path.dirname(self.fname),
             exist_ok=True,
         )
         # Rename the file
-        os.rename(files[0], output)
+        os.rename(files[0], self.fname)
 
         return True
+    
 
-    def rip_disc(self, paths: dict):
+class RipDisc(makemkv.MakeMKVRip):
+    """
+    Full disc backup
+
+    """
+
+    def __init__(
+        self,
+        dev: str,
+        info: dict,
+        tmpdir: str,
+        progress,
+    ):
+        """
+        Rip a given title from a disc
+
+        Rip a title from the given disc to
+        a specific output file.
+
+        Arguments:
+            dev (str) : Path of disc to backup
+            info (dict): Inforamtion about disc
+            tmpdir (str): Directory to backup to
+            progress (str): Main progress widget
+
+        """
+
+        super().__init__(
+            'backup',
+            dev=dev,
+            decrypt=True,
+            output=os.path.join(tmpdir, 'image.iso'),
+        )
+
+        self.progress = progress
+        self.progress.MKV_ADD_DISC.emit(self.dev, info, True)
+    
+    def run(self):
+        """Run in thread"""
+
+        try:
+            self._result = self.rip()
+        except Exception as err:
+            self.log.exception(
+                "%s - Failed to rip title: %s",
+                self.source[1],
+                err,
+            )
+
+        self.FINISHED.emit(self.output)
+
+    def rip(self):
         """
         Backup disc then extract titles
 
@@ -468,94 +652,176 @@ class Ripper(QtCore.QThread):
         for each title as there can be signifcant time spent scanning the disc
         to determine the layout of titles.
 
-        Arguments:
-            paths (dict) : Title and output mapping for the titles to extract
-                from the decrypted disc backup
-
         Returns:
             bool : True if ripped, False otherwise
 
         """
 
         self.log.debug('%s - Running rip disc', self.dev)
+    
+        # Start process for backup
+        self.makemkvcon()
 
-        if self.progress is not None:
-            self.progress.MKV_ADD_DISC.emit(self.dev, self.info, True)
-
-        tmpfile = 'image.iso'
-        tmppath = os.path.join(self.tmpdir, tmpfile)
-        self.mkv_thread = makemkv.MakeMKVRip(
-            'backup',
-            dev=self.dev,
-            decrypt=True,
-            output=tmppath,
+        # Need option for full disc
+        self.progress.MKV_NEW_PROCESS.emit(
+            self.dev,
+            self.proc,
+            self.pipe,
         )
-        self.mkv_thread.FAILURE.connect(self.FAILURE.emit)
-        self.mkv_thread.SUCCESS.connect(self.SUCCESS.emit)
 
-        self.mkv_thread.start()
+        # Wait for process to finish
+        self.monitor_proc()
 
-        if self.progress is not None:
-            # Need option for full disc
-            # self.progress.MKV_CUR_TRACK.emit(self.dev, title)
-            self.mkv_thread.started.wait()
-            self.progress.MKV_NEW_PROCESS.emit(
-                self.dev,
-                self.mkv_thread.proc,
-                self.mkv_thread.pipe,
-            )
-        self.mkv_thread.wait()
+        # Eject the disc
+        self.EJECT_DISC.emit()
 
-        self.EJECT_DISC.emit(self.dev)
-
-        # Remove full-disc progress widget
-        # if self.progress is not None:
-        #     self.progress.MKV_REMOVE_DISC.emit(self.dev)
-
-        if self.mkv_thread.returncode != 0 or self.mkv_thread.failure:
+        # If bad return code or failure       
+        if self.returncode != 0 or self.failure:
             self.log.warning("%s - Error backing up disc", self.dev)
+
             try:
-                os.remove(tmppath)
+                os.remove(self.output)
             except IsADirectoryError:
-                shutil.rmtree(tmppath)
+                shutil.rmtree(self.output)
             except FileNotFoundError:
                 pass
-            self.log.debug("%s - Removed dir: %s", self.dev, self.tmpdir)
+            self.log.debug("%s - Removed dir: %s", self.dev, self.output)
             return False
-
-        # Add not-full-disk
-        if self.progress is not None:
-            self.progress.MKV_ADD_DISC.emit(self.dev, self.info, False)
-
-        # Run title extration based on the media_type
-        if self.info.get('media_type', '') == 'DVD':
-            self.extract_titles_from_dvd_iso(paths, tmppath)
-        else:
-            self.extract_titles_from_bluray_iso(paths, tmppath)
-
-        # Attempt to remove the backup (tmp) file
-        if os.path.isdir(tmppath):
-            try:
-                shutil.rmtree(tmppath)
-            except Exception as err:
-                self.log.warning(
-                    "Failed to remove directory '%s': %s",
-                    tmppath,
-                    err,
-                )
-        elif os.path.isfile(tmppath):
-            try:
-                os.remove(tmppath)
-            except Exception as err:
-                self.log.warning(
-                    "Failed to remove file '%s': %s",
-                    tmppath,
-                    err,
-                )
  
         return True
 
-    def extract_titles_from_bluray_iso(self, paths: dict, src: str) -> None:
+
+class ExtractFromDVD(makemkv.MakeMKVRip):
+    """
+    Extract a title from a DVD backup
+
+    """
+
+    def __init__(self, src: str, paths: dict, tmpdir: str, progress):
+        """
+        Extract a given title from a DVD backup
+
+        Arguments:
+            src (str): Path to DVD backup iso
+            paths (dict): Dictionary with keys indicating title to extract
+                and values file to extract/move to
+            tmpdir (str): Temporary directory to extract titles to
+            progress: Progress widget
+
+        """
+
+        title = tuple(paths.keys())[0]
+        super().__init__(
+            'mkv',
+            title=title,
+            iso=src,
+            output=tmpdir,
+        )
+
+        self.src = src
+        self.paths = paths
+        self.progress = progress
+
+    def run(self):
+        """Run in thread"""
+
+        try:
+            self._result = self.extract()
+        except Exception as err:
+            self.log.exception(
+                "%s - Failed to rip title: %s",
+                self.source[1],
+                err,
+            )
+
+        output = self.paths.pop(self.title)  # Remove reference to title here
+        self.FINISHED.emit(output)
+
+    def extract(self):
+        self.log.debug('%s - Running extract title', self.src)
+
+        # Get output path for file
+        output = self.paths[self.title]
+
+        if os.path.isfile(output):
+            self.log.warning(
+                "%s - Output file already exists, skipping: %s",
+                self.src,
+                output,    
+            )
+            return
+
+        # If progress is set, then update current track
+        self.progress.MKV_CUR_TRACK.emit(self.src, self.title)
+
+        # Start the extract process
+        self.makemkvcon()
+
+        self.progress.MKV_NEW_PROCESS.emit(
+            self.src,
+            self.proc,
+            self.pipe,
+        )
+
+        self.monitor_proc()  # Wait for process to finish
+
+        # Get base name of the source file and then get all files in the
+        # output directory that are NOT then source file
+        fname = os.path.basename(self.src)
+        files = [
+            os.path.join(self.output, item)
+            for item in os.listdir(self.output)
+            if item != fname
+        ]
+
+        # If there was an error during extration
+        if self.returncode != 0 or self.failure:
+            self.log.warning(
+                "%s - Failed to extract title %s from backup",
+                self.src,
+                self.title,
+            )
+            if len(files) > 0:
+                for file in files:
+                    os.remove(file)
+
+            return False
+
+        # If number of files found is different that one (1)
+        if len(files) != 1:
+            self.log.error("%s - Too many output files!", self.src)
+            for fname in files:
+                os.remove(fname)
+            return False
+
+        # Rename/move the extracted file to where it should be
+        self.log.info(
+            "%s - Renaming file '%s' ---> '%s'",
+            self.src,
+            files[0],
+            output,
+        )
+        # Ensure output directory exists
+        os.makedirs(
+            os.path.dirname(output),
+            exist_ok=True,
+        )
+
+        # Rename the file
+        os.rename(files[0], output)
+
+        return True
+
+
+class ExtractFromBluRay(QtCore.QThread):
+    """
+    Extract title from BluRay backup
+
+    """
+
+    FINISHED = QtCore.pyqtSignal(str)
+
+    def __init__(self, src: str, paths: dict, progress):
         """
         Rip titles from Blu-Ray backup directory
 
@@ -579,6 +845,35 @@ class Ripper(QtCore.QThread):
 
         """
 
+        super().__init__()
+
+        self._result = None
+
+        self.src = src
+        self.paths = paths
+        self.progress = progress
+        self.title = tuple(self.paths.keys())[0]
+
+    @property
+    def result(self):
+        return self._result
+
+    def run(self):
+        """Run thread"""
+
+        try:
+            self._result = self.extract()
+        except Exception as err:
+            self.log.exception(
+                "%s - Failed to rip title: %s",
+                self.src,
+                err,
+            )
+
+        output = self.paths.pop(self.title)  # Remove reference to title here
+        self.FINISHED.emit(output)
+
+    def extract(self):
         # Try to get preferred language from MakeMKV settings and set
         # lang_opts if found
         lang = MAKEMKV_SETTINGS.get('app_PreferredLanguage', None)
@@ -589,198 +884,61 @@ class Ripper(QtCore.QThread):
                 '--subtitle-tracks', lang,
             ]
 
-        # Iterate over all titles/output files to rip
-        for title, output in paths.items():
-            if self._cancelled:
-                return
-
-            # Set current track on progress if defined
-            if self.progress is not None:
-                self.progress.MKV_CUR_TRACK.emit(self.dev, title)
-
-            # Try to get the source playlist/stream for the title
-            title_src = (
-                self
-                .info
-                .get('titles', {})
-                .get(title, {})
-                .get('Source FileName', None)
+        output = self.paths[self.title]
+        if os.path.isfile(output):
+            self.log.warning(
+                "%s - Output file already exists, skipping: %s",
+                self.src,
+                output,    
             )
-            if title_src is None:
-                self.log.error(
-                    "%s - Failed to find playlist name for title '%s', "
-                    "skipping.",
-                    self.dev,
-                    title,
-                )
-                continue
-
-            # Build full path to file based on extension
-            if title_src.endswith(PLAYLIST_EXT):
-                title_src = os.path.join(src, *PLAYLIST_DIR, title_src)
-            elif title_src.endswith(STREAM_EXT):
-                title_src = os.path.join(src, *STREAM_DIR, title_src)
-            else:
-                self.log.warning(
-                    "%s - File not currently supported: %s",
-                    self.dev,
-                    title_src,
-                )
-                continue
-
-            # Build mkvmerge command to run
-            cmd = [MKVMERGE, '-o', output]
-            if lang is not None:
-                cmd.extend(lang_opts)
-            cmd.append(title_src)
-
-            self.log.debug("%s - Running command: %s", self.dev, cmd)
-            proc = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                universal_newlines=True,
-            )
-            if self.progress is not None:
-                self.progress.MKV_NEW_PROCESS.emit(self.dev, proc, 'stdout')
-            proc.wait()
-
-    def extract_titles_from_dvd_iso(self, paths: dict, src: str) -> None:
-        """
-        Extract titles from DVD backup
-
-        DVD backups create an ISO file, which, unlike Blu-Rary backups, will
-        add titles in the exact same order as the disc when using MakeMKV.
-        So, this method iterates over the titles to rip, running MakeMKV to
-        extract each title.
-
-        Argumnets:
-            paths (dict): Title numbers and output files to rip
-            src (str): Source location of the backup directory
-
-        Returns:
-            None
-
-        """
-
-        for title, output in paths.items():
-            if self._cancelled:
-                return
-
-            # If progress is set, then update current track
-            if self.progress is not None:
-                self.progress.MKV_CUR_TRACK.emit(self.dev, title)
-
-            # Initialize MakeMKV process to extract title from ISO
-            self.mkv_thread_title = makemkv.MakeMKVRip(
-                'mkv',
-                title=title,
-                iso=src,
-                output=self.tmpdir,
-            )
-
-            # Start thread, wait for it to start, update progress if set, then
-            # wait for extraction to finish
-            self.mkv_thread_title.start()
-            self.mkv_thread_title.started.wait()
-            if self.progress is not None:
-                self.progress.MKV_NEW_PROCESS.emit(
-                    self.dev,
-                    self.mkv_thread_title.proc,
-                    self.mkv_thread_title.pipe,
-                )
-            self.mkv_thread_title.wait()
-
-            # If there was an error during extration
-            if self.mkv_thread_title.returncode != 0:
-                self.log.warning(
-                    "%s - Failed to extract title %s from backup %s",
-                    self.dev,
-                    title,
-                    src,
-                )
-                continue
-
-            # Get base name of the source file and then get all files in the
-            # output directory that are NOT then source file
-            fname = os.path.basename(src)
-            files = [
-                os.path.join(self.tmpdir, item)
-                for item in os.listdir(self.tmpdir)
-                if item != fname
-            ]
-
-            # If number of files found is different that one (1)
-            if len(files) != 1:
-                self.log.error("%s - Too many output files!", self.dev)
-                for fname in files:
-                    os.remove(fname)
-                continue
-
-            # Rename/move the extracted file to where it should be
-            self.log.info(
-                "%s - Renaming file '%s' ---> '%s'",
-                self.dev,
-                files[0],
-                output,
-            )
-            # Ensure output directory exists
-            os.makedirs(
-                os.path.dirname(output),
-                exist_ok=True,
-            )
-            # Rename the file
-            os.rename(files[0], output)
-
-    def run(self):
-        """
-        Method to run in separate thread
-
-        """
-
-        self._finished = self.rip()
-
-        try:
-            os.rmdir(self.tmpdir)
-        except Exception as err:
-            self.log.info(
-                "%s - Failed to remove directory: %s",
-                self.dev,
-                err,
-            )
-
-        self.log.info("%s - Ripper thread finished", self.dev)
-        self.FINISHED.emit(self.dev)
-
-    @QtCore.pyqtSlot(str)
-    def cancel(self, dev: str):
-
-        if dev!= self.dev:
             return
 
-        self._cancelled = True
-        self.log.info("%s - Cancelling rip", dev)
-        if self.mkv_thread is not None:
-            self.log.info('%s - Emitting: %s', dev, self.mkv_thread.mkv_id)
-            # self.mkv_thread.cancel(self.mkv_thread.source)
-            # print(">>> CANCEL.emit() called")
-            # print(f"Signal object ID: {id(self.mkv_thread.CANCEL)}")
-            # print(f"Owner ID: {id(self.mkv_thread)}")
-            self.mkv_thread.CANCEL.emit(self.mkv_thread.mkv_id)
-            # traceback.print_stack()
-        if self.mkv_thread_title is not None:
-            self.mkv_thread_title.CANCEL.emit(self.mkv_thread_title.source)
-        print('done with cancel')
-        
+        # Set current track on progress if defined
+        self.progress.MKV_CUR_TRACK.emit(self.src, self.title)
 
+        # Try to get the source playlist/stream for the title
+        title_src = (
+            self
+            .info
+            .get('titles', {})
+            .get(title, {})
+            .get('Source FileName', None)
+        )
+        if title_src is None:
+            self.log.error(
+                "%s - Failed to find playlist name for title '%s', "
+                "skipping.",
+                self.src,
+                self.title,
+            )
+            return False
 
-def directory_size(path):
-    """
-    Get size of all files in directory
+        # Build full path to file based on extension
+        if title_src.endswith(PLAYLIST_EXT):
+            title_src = os.path.join(self.src, *PLAYLIST_DIR, title_src)
+        elif title_src.endswith(STREAM_EXT):
+            title_src = os.path.join(self.src, *STREAM_DIR, title_src)
+        else:
+            self.log.warning(
+                "%s - File not currently supported: %s",
+                self.src,
+                title_src,
+            )
+            return False
 
-    """
+        # Build mkvmerge command to run
+        cmd = [MKVMERGE, '-o', output]
+        if lang is not None:
+            cmd.extend(lang_opts)
+        cmd.append(title_src)
 
-    return sum(
-        d.stat().st_size
-        for d in os.scandir(path)
-        if d.is_file()
-    )
+        self.log.debug("%s - Running command: %s", self.src, cmd)
+        self.proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            universal_newlines=True,
+        )
+        self.progress.MKV_NEW_PROCESS.emit(self.src, self.proc, 'stdout')
+        self.proc.wait()
+
+        return True

@@ -44,6 +44,7 @@ SOURCES = ('iso', 'file', 'disc', 'dev')
 COMMANDS = ('info', 'mkv', 'backup', 'f', 'reg')
 COMPLETE_PATTERN = 'Copy Complete'
 FAIL_PATTERN = 'Backup failed'
+BACKUP_EXISTS_PATTERN = 'already contains a backup'
 RESULTS_PREFIX = ("MSG:5004", "MSG:5037")
 
 
@@ -58,7 +59,7 @@ class MakeMKVThread(QtCore.QThread):
     # Send the dev device that failed
     FAILURE = QtCore.pyqtSignal(str)
     SUCCESS = QtCore.pyqtSignal(str)
-    CANCEL = QtCore.pyqtSignal(str)
+    CANCEL = QtCore.pyqtSignal()
 
     def __init__(
         self,
@@ -91,6 +92,7 @@ class MakeMKVThread(QtCore.QThread):
         self._dev = None
         self._failure = False
         self._success = False
+        self._backup_exists = False
 
         self.started = Event()
         self.command = command
@@ -296,19 +298,25 @@ class MakeMKVThread(QtCore.QThread):
             self._failure = True
             self.log.error("%s - Rip failed", self.source[1])
             self.FAILURE.emit('{}:{}'.format(*self.source))
+        elif BACKUP_EXISTS_PATTERN in line:
+            self._backup_exists = True
+            self.log.warning("%s - Rip failed; backup exists", self.source[1])
 
         return line
 
-    @QtCore.pyqtSlot(str)
-    def cancel(self, dev: str):
+    @QtCore.pyqtSlot()
+    def cancel(self):
         """Kill the MakeMKV Process"""
-        self.log.info('Cancel request: %s --> %s', dev, self.dev)
-        if dev == self.dev and self.proc:
-            self.log.info('Killing process')
+        self.log.info('%s - Cancel request', self.source[1])
+        if self.proc:
+            self.log.info('%s - Killing process', self.source[1])
             self.proc.kill()
 
 
 class MakeMKVRip(MakeMKVThread):
+
+    FINISHED = QtCore.pyqtSignal(str)
+    EJECT_DISC = QtCore.pyqtSignal()
 
     def __init__(self, command: str, pipe: str | None = None, **kwargs):
         kwargs = {
@@ -317,7 +325,14 @@ class MakeMKVRip(MakeMKVThread):
         }
 
         super().__init__(command, **kwargs)
+
+        self._result = None
+
         self.pipe = pipe or 'stderr'
+
+    @property
+    def result(self):
+        return self._result
 
     def monitor_proc(self):
 
@@ -333,13 +348,6 @@ class MakeMKVRip(MakeMKVThread):
             self.check_result(line)
         self.proc.wait()
         self.proc.communicate()
-
-        self.log.info("MakeMKVRip thread dead")
-
-    def run(self):
-
-        self.makemkvcon()
-        self.monitor_proc()
 
 
 class MakeMKVInfo(MakeMKVThread):

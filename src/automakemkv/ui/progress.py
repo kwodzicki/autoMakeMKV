@@ -9,6 +9,7 @@ from subprocess import Popen
 from PyQt5 import QtWidgets
 from PyQt5 import QtCore
 
+from .. import MAKEMKVCON, MKVMERGE
 from . import utils
 
 MEGABYTE = 10**6
@@ -97,10 +98,11 @@ class ProgressDialog(QtWidgets.QWidget):
         if widget is None:
             return
         self.log.debug("%s - Setting current track: %s", dev, title)
-        widget.current_track(title)
+        widget.CURRENT_TRACK.emit(title)
 
-    @QtCore.pyqtSlot(str)
-    def cancel(self, dev):
+    @QtCore.pyqtSlot()
+    def cancel(self):
+        dev = self.sender().dev
         self.log.info("%s - Emitting cancel event", dev)
         self.CANCEL.emit(dev)
         self.MKV_REMOVE_DISC.emit(dev)
@@ -297,8 +299,9 @@ class ProgressWidget(QtWidgets.QFrame):
 
     """
 
-    CANCEL = QtCore.pyqtSignal(str)  # dev to cancel rip of
+    CANCEL = QtCore.pyqtSignal()  # dev to cancel rip of
     NEW_PROCESS = QtCore.pyqtSignal(Popen, str)
+    CURRENT_TRACK = QtCore.pyqtSignal(str)
 
     def __init__(
         self,
@@ -310,6 +313,8 @@ class ProgressWidget(QtWidgets.QFrame):
         super().__init__()
 
         self.log = logging.getLogger(__name__)
+
+        self.CURRENT_TRACK.connect(self.current_track)
 
         self.setFrameStyle(
             QtWidgets.QFrame.StyledPanel | QtWidgets.QFrame.Plain
@@ -375,8 +380,9 @@ class ProgressWidget(QtWidgets.QFrame):
             message.Yes | message.No,
         )
         if res == message.Yes:
-            self.CANCEL.emit(self.dev)
+            self.CANCEL.emit()
 
+    @QtCore.pyqtSlot(str)
     def current_track(self, title: str):
         """
         Update current track index
@@ -444,7 +450,7 @@ class Metadata(QtWidgets.QWidget):
     def is_movie(self, info: dict):
 
         self.title.setText(info['title'])
-        self.year.setText(info['year'])
+        self.year.setText(str(info['year']))
 
         self.title.addToLayout(self._layout, self.idx)
         self.year.addToLayout(self._layout, self.idx)
@@ -452,7 +458,7 @@ class Metadata(QtWidgets.QWidget):
     def is_series(self, info: dict):
 
         self.series.setText(info['title'])
-        self.year.setText(info['year'])
+        self.year.setText(str(info['year']))
         self.title.setText(info['episodeTitle'])
         self.season.setText(info['season'])
         self.episode.setText(info['episode'])
@@ -522,9 +528,9 @@ class ProgressParser(QtCore.QThread):
                 continue
 
             cli = self.proc.args[0]
-            if 'makemkvcon' in cli:
+            if MAKEMKVCON in cli:
                 self.parse_makemkvcon(line)
-            elif 'mkvmerge' in cli:
+            elif MKVMERGE in cli:
                 self.parse_mkvmerge(line)
             else:
                 self.log.debug("Parser not implemented for: %s", cli)

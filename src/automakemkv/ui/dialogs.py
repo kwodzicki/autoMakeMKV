@@ -190,9 +190,9 @@ class MyQDialog(QtWidgets.QDialog):
     """
 
     # The dev device and the result code
-    FINISHED = QtCore.pyqtSignal(str, int)
+    FINISHED = QtCore.pyqtSignal(int)
 
     def done(self, arg):
 
         super().done(arg)
-        self.FINISHED.emit(self.dev, self.result())
+        self.FINISHED.emit(self.result())

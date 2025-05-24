@@ -39,7 +39,6 @@ class DiscMetadataEditor(dialogs.MyQDialog):
         self.curTitle = None
         self.discLabel = None
         self.info = None
-        self.sizes = None
 
         self.dev = dev
         self.hashid = hashid
@@ -105,7 +104,11 @@ class DiscMetadataEditor(dialogs.MyQDialog):
             path = utils.file_from_id(self.hashid, dbdir=self.dbdir)
             self.loadDisc.loadFile(json=path)
             self.buildTitleTree(
-                *utils.load_metadata(hashid=self.hashid, dbdir=self.dbdir)
+                info=utils.load_metadata(
+                    self.dev,
+                    hashid=self.hashid,
+                    dbdir=self.dbdir,
+                )
             )
         else:
             self.log.info("Loading new disc")
@@ -175,7 +178,7 @@ class DiscMetadataEditor(dialogs.MyQDialog):
         self.msgs.clear()
         self.loadDisc.loadFile(json=files[0])
         self.buildTitleTree(
-            *utils.load_metadata(fpath=files[0])
+            info=utils.load_metadata(self.dev, fpath=files[0])
         )
 
     def save(self, *args, **kwargs):
@@ -201,7 +204,6 @@ class DiscMetadataEditor(dialogs.MyQDialog):
             )
 
         titles = {}
-        sizes = {}
         root = self.titleTree.invisibleRootItem()
         for i in range(root.childCount()):
             titleObj = root.child(i)  # Get the object from the QTreeWidget
@@ -212,9 +214,6 @@ class DiscMetadataEditor(dialogs.MyQDialog):
                 return
 
             titles[titleObj.titleID] = titleObj.info
-            sizes[titleObj.titleID] = int(
-                titleObj.makeMKVInfo.get(SIZEKEY, '0')
-            )
 
         if len(titles) == 0:
             self.log.info('No titles marked for ripping!')
@@ -244,7 +243,6 @@ class DiscMetadataEditor(dialogs.MyQDialog):
                 replace=True,
             )
             self.info = info
-            self.sizes = sizes
             self.done(RIP if kwargs.get('rip', False) else SAVE)
 
     def selectTitle(self, obj, col):
@@ -294,7 +292,7 @@ class DiscMetadataEditor(dialogs.MyQDialog):
         # actual current title
         self.titleMetadata.setInfo(obj.info)
 
-    def buildTitleTree(self, info=None, sizes=None):
+    def buildTitleTree(self, info=None):
 
         # Remove the progress widget from the window
         self.layout().removeWidget(self.progress)

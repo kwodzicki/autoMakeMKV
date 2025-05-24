@@ -474,7 +474,6 @@ class Metadata(QtWidgets.QWidget):
         for i in reversed(range(self._layout.count())):
             widget = self._layout.itemAt(i).widget()
             self._layout.removeWidget(widget)
-            widget.deleteLater()
 
 
 class ProgressParser(QtCore.QThread):

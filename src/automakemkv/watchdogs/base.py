@@ -159,5 +159,10 @@ class BaseWatchdog(QtCore.QThread):
         elif sys.platform.startswith('win'):
             command = f"open {dev}: type CDAudio alias drive"
             ctypes.windll.winmm.mciSendStringW(command, None, 0, None)
-            ctypes.windll.winmm.mciSendStringW("set drive door open", None, 0, None)
+            ctypes.windll.winmm.mciSendStringW(
+                "set drive door open",
+                None,
+                0,
+                None,
+            )
             ctypes.windll.winmm.mciSendStringW("close drive", None, 0, None)

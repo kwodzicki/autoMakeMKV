@@ -25,10 +25,10 @@ class DiscHasher(QtCore.QThread):
         self.root = root
 
     def run(self):
-        hash = self.get_hash()
-        if hash is None:
-            hash = ''
-        self.FINISHED.emit(hash)
+        disc_hash = self.get_hash()
+        if disc_hash is None:
+            disc_hash = ''
+        self.FINISHED.emit(disc_hash)
 
     def get_hash(self) -> str | None:
 
@@ -145,7 +145,8 @@ if __name__ == "__main__":
     hash_file = os.path.join(args.outdir, f"{base}.txt")
     pick_file = os.path.join(args.outdir, f"{base}.pik")
 
-    hash_str = get_hash(args.src)
+    inst = DiscHasher(args.src)
+    hash_str = inst.get_hash(args.src)
     print(hash_str)
     with open(hash_file, mode='w') as oid:
         oid.write(hash_str)

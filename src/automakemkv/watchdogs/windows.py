@@ -4,16 +4,12 @@ Utilities for ripping titles
 """
 
 import logging
-from threading import Thread
-from queue import Queue
 
-from PyQt5 import QtWidgets, QtCore
 import win32con
 import win32file
 import win32gui
 import win32gui_struct
 
-from . import RUNNING
 from .base import BaseWatchdog
 
 
@@ -65,19 +61,25 @@ class Watchdog(BaseWatchdog):
         if msg == win32con.WM_DEVICECHANGE and wparam is not None:
             try:
                 dev_broadcast = win32gui_struct.UnpackDEV_BROADCAST(lparam)
-            except Exception as err:
+            except Exception:
                 pass
             else:
                 device_type = getattr(dev_broadcast, 'devicetype', None)
                 unitmask = getattr(dev_broadcast, 'unitmask', None)
                 arrival = wparam == win32con.DBT_DEVICEARRIVAL
                 self.process_device_change(device_type, unitmask, arrival)
-        return win32gui.CallWindowProc(self.old_proc, hwnd, msg, wparam, lparam)
+        return win32gui.CallWindowProc(
+            self.old_proc,
+            hwnd,
+            msg,
+            wparam,
+            lparam,
+        )
 
     def process_device_change(self, device_type, unitmask, arrival: bool):
         if device_type != win32con.DBT_DEVTYP_VOLUME:
             return
-        
+
         drives = self._mask_to_letters(unitmask)
         for dev in drives:
             if not self._is_cdrom(dev):
@@ -99,10 +101,12 @@ class Watchdog(BaseWatchdog):
 
     def _is_cdrom(self, drive_letter):
         try:
-            return win32file.GetDriveType(f"{drive_letter}\\") == win32file.DRIVE_CDROM
-        except:
+            return (
+                win32file.GetDriveType(f"{drive_letter}\\")
+                == win32file.DRIVE_CDROM
+            )
+        except Exception:
             return False
-
 
     def start(self):
         """

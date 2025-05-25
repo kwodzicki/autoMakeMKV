@@ -4,7 +4,6 @@ import sys
 import shutil
 import re
 import json
-import gzip
 
 if sys.platform.startswith('win'):
     import wmi
@@ -176,12 +175,12 @@ def get_vendor_model(path: str) -> tuple[str]:
 
     vendor = model = ''
     if sys.platform.startswith('linux'):
-        vendor, model= linux_vendor_model(path)
+        vendor, model = linux_vendor_model(path)
     elif sys.platform.startswith('win'):
         pythoncom.CoInitialize()
         try:
             vendor, model = windows_vendor_model(path)
-        except:
+        except Exception:
             pass
         finally:
             pythoncom.CoUninitialize()

@@ -112,7 +112,7 @@ class DiscHandler(QtCore.QObject):
 
         # We compute disc hash in thread to keep the GUI alive.
         # When finished will trigger the disc_lookup method,
-        # passing in the disc hash 
+        # passing in the disc hash
         mnt = utils.dev_to_mount(dev)
         self.hashid = disc_hash.DiscHasher(mnt)
         self.hashid.FINISHED.connect(self.disc_lookup)
@@ -178,7 +178,10 @@ class DiscHandler(QtCore.QObject):
         self.hashid = hashid if hashid != '' else None
 
         if self.discid is None and self.hashid is None:
-            self.log.info("%s - No UUID found or hash for disc, ignoring", self.dev)
+            self.log.info(
+                "%s - No UUID found or hash for disc, ignoring",
+                self.dev,
+            )
             return
 
         # Get title informaiton for tracks to rip
@@ -198,7 +201,11 @@ class DiscHandler(QtCore.QObject):
 
         # Update mounted information and run rip_disc
         self.info = info
-        self.options = metadata.ExistingDiscOptions(self.dev, info, self.convention)
+        self.options = metadata.ExistingDiscOptions(
+            self.dev,
+            info,
+            self.convention,
+        )
         self.options.FINISHED.connect(self.handle_metadata)
 
     @QtCore.pyqtSlot(bool)
@@ -235,8 +242,8 @@ class DiscHandler(QtCore.QObject):
         # Clean up any windows that are hanging around
         if self.options is not None:
             # Get convention from window; we update the attribute because
-            # if they changed it and then opened to edit metadata, the selection
-            # would be lost.
+            # if they changed it and then opened to edit metadata, the
+            # selection would be lost.
             self.convention = self.options.convention
             self.log.debug("%s - Cleaning up the options window", self.dev)
             self.options.deleteLater()
@@ -335,7 +342,7 @@ class DiscHandler(QtCore.QObject):
         self.ripper.FINISHED.connect(self.rip_finished)
 
         # Start the thread
-        self.ripper.start()        
+        self.ripper.start()
 
     @QtCore.pyqtSlot(str)
     def rip_finished(self, backup_path: str) -> None:
@@ -350,9 +357,9 @@ class DiscHandler(QtCore.QObject):
         Arguments:
             backup_path (str): Full path to the backup of the disc to extract
                 titles from
- 
+
         """
-        
+
         self.ripper.wait()  # This "shouldn't" take too long
         success = self.ripper.result
         self.progress.MKV_REMOVE_DISC.emit(self.dev)
@@ -376,7 +383,7 @@ class DiscHandler(QtCore.QObject):
             except Exception:
                 pass
             self.FINISHED.emit()
-    
+
     @QtCore.pyqtSlot(str)
     def extract_title(self, previous_output: str) -> None:
         """
@@ -591,7 +598,7 @@ class RipTitle(makemkv.MakeMKVRip):
         os.rename(files[0], self.fname)
 
         return True
-    
+
 
 class RipDisc(makemkv.MakeMKVRip):
     """
@@ -629,7 +636,7 @@ class RipDisc(makemkv.MakeMKVRip):
 
         self.progress = progress
         self.progress.MKV_ADD_DISC.emit(self.dev, info, True)
-    
+
     def run(self):
         """Run in thread"""
 
@@ -659,7 +666,7 @@ class RipDisc(makemkv.MakeMKVRip):
         """
 
         self.log.debug('%s - Running rip disc', self.dev)
-    
+
         # Start process for backup
         self.makemkvcon()
 
@@ -676,7 +683,7 @@ class RipDisc(makemkv.MakeMKVRip):
         # Eject the disc
         self.EJECT_DISC.emit()
 
-        # If bad return code or failure       
+        # If bad return code or failure
         if self.returncode != 0 or self.failure:
             self.log.warning("%s - Error backing up disc", self.dev)
 
@@ -688,7 +695,7 @@ class RipDisc(makemkv.MakeMKVRip):
                 pass
             self.log.debug("%s - Removed dir: %s", self.dev, self.output)
             return False
- 
+
         return True
 
 
@@ -748,7 +755,7 @@ class ExtractFromDVD(makemkv.MakeMKVRip):
             self.log.warning(
                 "%s - Output file already exists, skipping: %s",
                 self.src,
-                output,    
+                output,
             )
             return
 
@@ -892,7 +899,7 @@ class ExtractFromBluRay(QtCore.QThread):
             self.log.warning(
                 "%s - Output file already exists, skipping: %s",
                 self.src,
-                output,    
+                output,
             )
             return
 
@@ -931,7 +938,6 @@ class ExtractFromBluRay(QtCore.QThread):
         if lang is not None:
             cmd.extend(lang_opts)
         cmd.append(title_src)
-
 
         self.log.debug("%s - Running command: %s", self.src, cmd)
         self.proc = subprocess.Popen(

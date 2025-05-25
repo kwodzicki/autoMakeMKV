@@ -92,7 +92,8 @@ ROTFILE = RotatingFileHandler(
 ROTFILE.setLevel(logging.INFO)
 ROTFILE.setFormatter(
     logging.Formatter(
-        '%(asctime)s [%(levelname).4s] (%(thread)d) {%(name)s.%(funcName)s} %(message)s'
+        '%(asctime)s [%(levelname).4s] (%(thread)d) '
+        '{%(name)s.%(funcName)s} %(message)s'
     )
 )
 

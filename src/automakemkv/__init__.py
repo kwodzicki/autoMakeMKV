@@ -4,6 +4,9 @@ from logging.handlers import RotatingFileHandler
 import os
 import sys
 import shutil
+import importlib.metadata
+
+__version__ = importlib.metadata.version(__name__)
 
 UUID_ROOT = "/dev/disk/by-uuid"
 LABEL_ROOT = "/dev/disk/by-label"

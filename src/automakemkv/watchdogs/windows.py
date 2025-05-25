@@ -84,12 +84,7 @@ class Watchdog(BaseWatchdog):
                 continue
 
             if not arrival:
-                self.log.debug("%s - Caught eject event", dev)
-                # self.HANDLE_EJECT.emit(dev)
-                continue
-
-            if dev in self._mounted:
-                self.log.info("%s - Device in mounted list", dev)
+                self.log.debug("%s - Caught non-insert event", dev)
                 continue
 
             self.log.debug("%s - Finished mounting", dev)

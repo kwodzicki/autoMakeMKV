@@ -52,7 +52,6 @@ class BaseWatchdog(QtCore.QThread):
         self.log = logging.getLogger(__name__)
 
         self.HANDLE_INSERT.connect(self.handle_insert)
-        self.HANDLE_EJECT.connect(self.handle_eject)
 
         self._outdir = None
         self._mounted = []
@@ -124,16 +123,6 @@ class BaseWatchdog(QtCore.QThread):
             self._mounted.remove(sender)
         sender.cancel(sender.dev)
         sender.deleteLater()
-
-    @QtCore.pyqtSlot()
-    def handle_eject(self):
-
-        dev = self.sender().dev
-        print("handle eject:", dev)
-        return
-        proc = self._mounted.pop(dev, None)
-        if proc is None:
-            return
 
     @QtCore.pyqtSlot(str)
     def handle_insert(self, dev):

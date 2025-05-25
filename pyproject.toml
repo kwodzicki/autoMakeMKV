@@ -8,7 +8,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "automakemkv"
-version = "3.11.0"
+version = "3.12.0"
 description = "Package for automagically ripping media with MakeMKV"
 readme = "README.md"
 authors = [
@@ -31,7 +31,6 @@ requires-python = ">=3.9"
 dependencies = [
     "PyQt5",
     "pyudev ; platform_system == 'Linux'",
-    "pywin32 ; platform_system == 'Windows'",
     "pywin32 ; platform_system == 'Windows'",
     "WMI ; platform_system == 'Windows'",
 ]

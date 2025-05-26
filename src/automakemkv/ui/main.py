@@ -5,8 +5,9 @@ import argparse
 
 from PyQt5 import QtWidgets
 from PyQt5 import QtCore
+from PyQt5 import QtGui
 
-from .. import LOG, STREAM, ROTFILE, NAME
+from .. import LOG, STREAM, ROTFILE, NAME, APP_ICON, TRAY_ICON
 from . import progress
 from . import dialogs
 from . import utils
@@ -26,15 +27,8 @@ class SystemTray(QtWidgets.QSystemTrayIcon):
     """
 
     def __init__(self, app, name=NAME):
-        icon = (
-            QtWidgets
-            .QApplication
-            .style()
-            .standardIcon(
-                QtWidgets.QStyle.SP_DriveDVDIcon
-            )
-        )
-        super().__init__(icon, app)
+
+        super().__init__(QtGui.QIcon(TRAY_ICON), app)
 
         self.__log = logging.getLogger(__name__)
         self._name = name
@@ -164,6 +158,7 @@ def cli():
     LOG.addHandler(STREAM)
 
     app = QtWidgets.QApplication(sys.argv)
+    app.setWindowIcon(QtGui.QIcon(APP_ICON))
     app.setQuitOnLastWindowClosed(False)
     _ = SystemTray(app)
     res = app.exec_()

@@ -84,6 +84,14 @@ class Watchdog(BaseWatchdog):
             if device.properties.get(CDTYPE, '') != '1':
                 continue
 
+            if device.properties.get(EJECT, ''):
+                self.log.debug("%s - Eject request", dev)
+                continue
+
+            if device.properties.get(READY, '') == '0':
+                self.log.debug("%s - Drive is ejectecd", dev)
+                continue
+
             if device.properties.get(CHANGE, '') != '1':
                 self.log.debug(
                     "%s - Not a '%s' event, ignoring",

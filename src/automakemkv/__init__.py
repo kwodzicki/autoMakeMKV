@@ -4,14 +4,19 @@ from logging.handlers import RotatingFileHandler
 import os
 import sys
 import shutil
-import importlib.metadata
-
-__version__ = importlib.metadata.version(__name__)
+from importlib.metadata import metadata as pkg_metadata
 
 UUID_ROOT = "/dev/disk/by-uuid"
 LABEL_ROOT = "/dev/disk/by-label"
 
 NAME = 'autoMakeMKV'
+
+RESOURCES = os.path.join(
+    os.path.dirname(
+        os.path.abspath(__file__)
+    ),
+    'resources',
+)
 
 HOMEDIR = os.path.expanduser('~')
 OUTDIR = os.path.join(HOMEDIR, 'Videos')
@@ -20,6 +25,7 @@ DBDIR = os.path.join(
     f".{__name__}DB",
 )
 
+TRAY_ICON = os.path.join(RESOURCES, "tray_icon.png")
 if sys.platform.startswith('linux'):
     APPDIR = os.path.join(
         HOMEDIR,
@@ -29,6 +35,7 @@ if sys.platform.startswith('linux'):
     )
     MAKEMKVCON = shutil.which('makemkvcon')
     MKVMERGE = shutil.which('mkvmerge')
+    APP_ICON = os.path.join(RESOURCES, "app_icon_linux.png")
 elif sys.platform.startswith('win'):
     APPDIR = os.path.join(
         HOMEDIR,
@@ -51,6 +58,7 @@ elif sys.platform.startswith('win'):
         [os.path.join(root, 'MKVToolNix') for root in SEARCH_DIRS]
     )
     MKVMERGE = shutil.which('mkvmerge', path=path)
+    APP_ICON = os.path.join(RESOURCES, "app_icon_windows.png")
 else:
     raise Exception(
         f"System platform '{sys.platform}' not currently supported"
@@ -99,3 +107,9 @@ ROTFILE.setFormatter(
 
 LOG.addHandler(STREAM)
 LOG.addHandler(ROTFILE)
+
+meta = pkg_metadata(__name__)
+__version__ = meta.json['version']
+# __url__ = meta.json['project_url'][0].split(',')[1].strip()
+
+del meta

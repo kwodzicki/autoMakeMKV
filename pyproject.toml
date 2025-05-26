@@ -41,3 +41,5 @@ autoMakeMKV = "automakemkv.ui.main:cli"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+automakemkv = ['resources/*.png', 'resources/*.ico']

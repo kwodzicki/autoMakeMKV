@@ -4,9 +4,15 @@ Utilities for ripping titles
 """
 
 import logging
+import sys
+from subprocess import call
 
 from PyQt5 import QtCore
 
+if sys.platform.startswith('win'):
+    import ctypes
+
+from .. import UUID_ROOT, OUTDIR, DBDIR
 from .. import ripper
 from ..ui import dialogs
 
@@ -27,28 +33,37 @@ class BaseWatchdog(QtCore.QThread):
 
     """
 
-    HANDLE_DISC = QtCore.pyqtSignal(str)
+    HANDLE_INSERT = QtCore.pyqtSignal(str)
+    HANDLE_EJECT = QtCore.pyqtSignal(str)
+    EJECT_DISC = QtCore.pyqtSignal()
 
-    def __init__(self):
+    def __init__(
+        self,
+        progress,
+        *args,
+        outdir: str = OUTDIR,
+        everything: bool = False,
+        extras: bool = False,
+        convention: str = 'video_utils',
+        root: str = UUID_ROOT,
+        **kwargs,
+    ):
         super().__init__()
         self.log = logging.getLogger(__name__)
-        self.log.debug("%s started", __name__)
 
-        self.HANDLE_DISC.connect(self.handle_disc)
+        self.HANDLE_INSERT.connect(self.handle_insert)
 
         self._outdir = None
+        self._mounted = []
 
-        self.dbdir = None
-        self.outdir = None
-        self.everything = None
-        self.extras = None
-        self.convention = None
-        self.root = None
-        self.progress_dialog = None
+        self.progress = progress
 
-        self._mounting = {}
-        self._mounted = {}
-        self._monitor = None
+        self.dbdir = kwargs.get('dbdir', DBDIR)
+        self.outdir = outdir
+        self.everything = everything
+        self.extras = extras
+        self.convention = convention
+        self.root = root
 
     @property
     def outdir(self):
@@ -82,32 +97,35 @@ class BaseWatchdog(QtCore.QThread):
             'convention': self.convention,
         }
 
-    def _ejecting(self, dev):
-
-        proc = self._mounted.pop(dev, None)
-        if proc is None:
-            return
-
-        if proc.isRunning():
-            self.log.warning("%s - Killing the ripper process!", dev)
-            proc.terminate(dev)
-            return
-
     def quit(self, *args, **kwargs):
         RUNNING.set()
 
-    def rip_failure(self, device: str):
+    @QtCore.pyqtSlot()
+    def rip_failure(self):
 
-        dialog = dialogs.RipFailure(device)
+        dev = self.sender().dev
+        dialog = dialogs.RipFailure(dev)
         dialog.exec_()
 
-    def rip_success(self, device: str):
+    @QtCore.pyqtSlot()
+    def rip_success(self):
 
-        dialog = dialogs.RipSuccess(device)
+        dev = self.sender().dev
+        dialog = dialogs.RipSuccess(dev)
         dialog.exec_()
+
+    @QtCore.pyqtSlot()
+    def rip_finished(self):
+
+        sender = self.sender()
+        self.log.debug("%s - Processing finished event", sender.dev)
+        if sender in self._mounted:
+            self._mounted.remove(sender)
+        sender.cancel(sender.dev)
+        sender.deleteLater()
 
     @QtCore.pyqtSlot(str)
-    def handle_disc(self, dev: str):
+    def handle_insert(self, dev):
 
         obj = ripper.DiscHandler(
             dev,
@@ -117,10 +135,34 @@ class BaseWatchdog(QtCore.QThread):
             self.convention,
             self.dbdir,
             self.root,
-            self.progress_dialog,
+            self.progress,
         )
 
         obj.FAILURE.connect(self.rip_failure)
         obj.SUCCESS.connect(self.rip_success)
+        obj.FINISHED.connect(self.rip_finished)
+        obj.EJECT_DISC.connect(self.eject_disc)
+        self._mounted.append(obj)
 
-        self._mounted[dev] = obj
+    @QtCore.pyqtSlot()
+    def eject_disc(self) -> None:
+        """
+        Eject the disc
+
+        """
+
+        dev = self.sender().dev
+        self.log.debug("%s - Ejecting disc", dev)
+
+        if sys.platform.startswith('linux'):
+            call(['eject', dev])
+        elif sys.platform.startswith('win'):
+            command = f"open {dev}: type CDAudio alias drive"
+            ctypes.windll.winmm.mciSendStringW(command, None, 0, None)
+            ctypes.windll.winmm.mciSendStringW(
+                "set drive door open",
+                None,
+                0,
+                None,
+            )
+            ctypes.windll.winmm.mciSendStringW("close drive", None, 0, None)

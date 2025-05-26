@@ -5,12 +5,19 @@ import argparse
 
 from PyQt5 import QtWidgets
 from PyQt5 import QtCore
+from PyQt5 import QtGui
 
-from .. import LOG, STREAM, NAME
-from ..watchdogs import linux
+from .. import LOG, STREAM, ROTFILE, NAME, APP_ICON, TRAY_ICON
 from . import progress
 from . import dialogs
 from . import utils
+
+if sys.platform.startswith('linux'):
+    from ..watchdogs import linux as disc_watchdog
+elif sys.platform.startswith('win'):
+    from ..watchdogs import windows as disc_watchdog
+else:
+    raise Exception(f"Platform '{sys.platform}' not currently supported!")
 
 
 class SystemTray(QtWidgets.QSystemTrayIcon):
@@ -20,15 +27,8 @@ class SystemTray(QtWidgets.QSystemTrayIcon):
     """
 
     def __init__(self, app, name=NAME):
-        icon = (
-            QtWidgets
-            .QApplication
-            .style()
-            .standardIcon(
-                QtWidgets.QStyle.SP_DriveDVDIcon
-            )
-        )
-        super().__init__(icon, app)
+
+        super().__init__(QtGui.QIcon(TRAY_ICON), app)
 
         self.__log = logging.getLogger(__name__)
         self._name = name
@@ -58,17 +58,17 @@ class SystemTray(QtWidgets.QSystemTrayIcon):
         settings = utils.load_settings()
 
         self.progress = progress.ProgressDialog()
-        self.ripper = linux.Watchdog(
+        self.watchdog = disc_watchdog.Watchdog(
             self.progress,
             **settings,
         )
-        self.ripper.start()
+        self.watchdog.start()
 
         # Set up check of output directory exists to run right after event
         # loop starts
         QtCore.QTimer.singleShot(
             0,
-            self.check_outdir_exists,
+            self.check_dirs_exists,
         )
 
     def settings_widget(self, *args, **kwargs):
@@ -76,21 +76,22 @@ class SystemTray(QtWidgets.QSystemTrayIcon):
         self.__log.debug('opening settings')
         settings_widget = dialogs.SettingsDialog()
         if settings_widget.exec_():
-            self.ripper.set_settings(
+            self.watchdog.set_settings(
                 **settings_widget.get_settings(),
             )
 
     def quit(self, *args, **kwargs):
         """Display quit confirm dialog"""
-        self.__log.info('Saving settings')
+        self.__log.info('Quitting program')
 
         utils.save_settings(
-            self.ripper.get_settings(),
+            self.watchdog.get_settings(),
         )
 
         if kwargs.get('force', False):
             self.__log.info('Force quit')
-            self.ripper.quit()
+            self.watchdog.quit()
+            self.watchdog.wait()
             self._app.quit()
 
         msg = QtWidgets.QMessageBox()
@@ -103,35 +104,42 @@ class SystemTray(QtWidgets.QSystemTrayIcon):
         )
         res = msg.exec_()
         if res == QtWidgets.QMessageBox.Yes:
-            self.ripper.quit()
+            self.watchdog.quit()
+            self.watchdog.wait()
             self._app.quit()
 
-    def check_outdir_exists(self):
+    def check_dirs_exists(self):
         """
         Check that video output directory exists
 
         """
 
-        if os.path.isdir(self.ripper.outdir):
-            return
+        dirs = {
+            'outdir': 'Output',
+            'dbdir': 'Database',
+        }
+        for dir, lname in dirs.items():
+            val = getattr(self.watchdog, dir)
+            if os.path.isdir(val):
+                continue
 
-        dlg = dialogs.MissingOutdirDialog(self.ripper.outdir)
-        if not dlg.exec_():
-            self.quit(force=True)
-            return
+            dlg = dialogs.MissingDirDialog(val, lname)
+            if not dlg.exec_():
+                self.quit(force=True)
+                continue
 
-        path = QtWidgets.QFileDialog.getExistingDirectory(
-            QtWidgets.QDialog(),
-            f'{self._name}: Select Output Folder',
-        )
-        if path != '':
-            self.ripper.outdir = path
-            utils.save_settings(
-                self.ripper.get_settings(),
+            path = QtWidgets.QFileDialog.getExistingDirectory(
+                QtWidgets.QDialog(),
+                f'{self._name}: Select {lname} Folder',
             )
-            return
+            if path != '':
+                setattr(self.watchdog, dir, path)
+                settings = self.watchdog.get_settings()
+                print(settings)
+                utils.save_settings(settings)
+                continue
 
-        self.check_outdir_exists()
+            self.check_dirs_exists()
 
 
 def cli():
@@ -145,10 +153,13 @@ def cli():
 
     args = parser.parse_args()
 
+    ROTFILE.setLevel(args.loglevel)
     STREAM.setLevel(args.loglevel)
     LOG.addHandler(STREAM)
 
     app = QtWidgets.QApplication(sys.argv)
+    app.setWindowIcon(QtGui.QIcon(APP_ICON))
     app.setQuitOnLastWindowClosed(False)
     _ = SystemTray(app)
-    app.exec_()
+    res = app.exec_()
+    sys.exit(res)

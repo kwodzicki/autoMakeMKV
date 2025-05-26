@@ -7,8 +7,6 @@ import logging
 
 import pyudev
 
-from .. import UUID_ROOT, OUTDIR, DBDIR
-
 from . import RUNNING
 from .base import BaseWatchdog
 
@@ -34,16 +32,7 @@ class Watchdog(BaseWatchdog):
 
     """
 
-    def __init__(
-        self,
-        progress_dialog,
-        outdir: str = OUTDIR,
-        everything: bool = False,
-        extras: bool = False,
-        convention: str = 'video_utils',
-        root: str = UUID_ROOT,
-        **kwargs,
-    ):
+    def __init__(self, *args, **kwargs):
         """
         Arguments:
             outdir (str) : Top-level directory for ripping files
@@ -62,21 +51,9 @@ class Watchdog(BaseWatchdog):
 
         """
 
-        super().__init__()
+        super().__init__(*args, **kwargs)
         self.log = logging.getLogger(__name__)
         self.log.debug("%s started", __name__)
-
-        self.HANDLE_DISC.connect(self.handle_disc)
-
-        self._outdir = None
-
-        self.dbdir = kwargs.get('dbdir', DBDIR)
-        self.outdir = outdir
-        self.everything = everything
-        self.extras = extras
-        self.convention = convention
-        self.root = root
-        self.progress_dialog = progress_dialog
 
         self._context = pyudev.Context()
         self._monitor = pyudev.Monitor.from_netlink(self._context)
@@ -109,12 +86,10 @@ class Watchdog(BaseWatchdog):
 
             if device.properties.get(EJECT, ''):
                 self.log.debug("%s - Eject request", dev)
-                self._ejecting(dev)
                 continue
 
             if device.properties.get(READY, '') == '0':
                 self.log.debug("%s - Drive is ejectecd", dev)
-                self._ejecting(dev)
                 continue
 
             if device.properties.get(CHANGE, '') != '1':
@@ -132,10 +107,5 @@ class Watchdog(BaseWatchdog):
                 )
                 continue
 
-            if dev in self._mounted:
-                self.log.info("%s - Device in mounted list", dev)
-                continue
-
             self.log.debug("%s - Finished mounting", dev)
-            self._mounted[dev] = None
-            self.HANDLE_DISC.emit(dev)
+            self.HANDLE_INSERT.emit(dev)

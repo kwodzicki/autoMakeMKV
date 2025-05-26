@@ -119,9 +119,15 @@ class BaseWatchdog(QtCore.QThread):
 
         sender = self.sender()
         self.log.debug("%s - Processing finished event", sender.dev)
+        sender.cancel(sender.dev)
         if sender in self._mounted:
             self._mounted.remove(sender)
-        sender.cancel(sender.dev)
+        else:
+            self.log.warning(
+                "%s - Did not find sender object in _mounted",
+                sender.dev,
+            )
+
         sender.deleteLater()
 
     @QtCore.pyqtSlot(str)

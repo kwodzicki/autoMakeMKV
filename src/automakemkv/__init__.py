@@ -110,6 +110,6 @@ LOG.addHandler(ROTFILE)
 
 meta = pkg_metadata(__name__)
 __version__ = meta.json['version']
-# __url__ = meta.json['project_url'][0].split(',')[1].strip()
+__url__ = meta.json['project_url'][0].split(',')[1].strip()
 
 del meta

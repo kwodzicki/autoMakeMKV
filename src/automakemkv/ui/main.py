@@ -30,6 +30,7 @@ class SystemTray(QtWidgets.QSystemTrayIcon):
 
         super().__init__(QtGui.QIcon(TRAY_ICON), app)
 
+        self.setToolTip(NAME)
         self.__log = logging.getLogger(__name__)
         self._name = name
         self._settingsInfo = None
@@ -158,6 +159,7 @@ def cli():
     LOG.addHandler(STREAM)
 
     app = QtWidgets.QApplication(sys.argv)
+    app.setApplicationName(NAME)
     app.setWindowIcon(QtGui.QIcon(APP_ICON))
     app.setQuitOnLastWindowClosed(False)
     _ = SystemTray(app)

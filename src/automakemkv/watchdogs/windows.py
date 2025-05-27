@@ -6,6 +6,7 @@ Utilities for ripping titles
 import logging
 
 import win32con
+import win32api
 import win32file
 import win32gui
 import win32gui_struct
@@ -90,6 +91,11 @@ class Watchdog(BaseWatchdog):
                 continue
 
             self.log.debug("%s - Finished mounting", dev)
+            fs = win32api.GetVolumeInformation(dev)[4]
+            if fs == "CDFS":
+                self.log.debug("%s - Is audio disc; ignoring", dev)
+                continue
+
             self.HANDLE_INSERT.emit(dev)
 
     def _mask_to_letters(self, mask):

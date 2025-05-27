@@ -5,6 +5,7 @@ from PyQt5 import QtCore
 
 from .. import NAME
 from .. import makemkv
+from ..path_utils import CONVENTIONS
 from . import utils
 from . import base_widgets
 from . import dialogs
@@ -25,7 +26,7 @@ class DiscMetadataEditor(dialogs.MyQDialog):
     def __init__(
         self,
         dev: str,
-        discid: str,
+        hashid: str,
         dbdir: str,
         *args,
         load_existing: bool = False,
@@ -38,10 +39,9 @@ class DiscMetadataEditor(dialogs.MyQDialog):
         self.curTitle = None
         self.discLabel = None
         self.info = None
-        self.sizes = None
 
         self.dev = dev
-        self.discid = discid
+        self.hashid = hashid
         self.dbdir = dbdir
         self.vendor, self.model = utils.get_vendor_model(dev)
         self.setWindowTitle()
@@ -92,7 +92,7 @@ class DiscMetadataEditor(dialogs.MyQDialog):
 
         self.loadDisc = makemkv.MakeMKVInfo(
             dev,
-            discid,
+            hashid,
             dbdir=self.dbdir,
         )
         self.loadDisc.FAILURE.connect(self.load_failed)
@@ -101,10 +101,14 @@ class DiscMetadataEditor(dialogs.MyQDialog):
 
         if load_existing:
             self.log.info("Loading existing information")
-            path = utils.file_from_discid(self.discid, dbdir=self.dbdir)
+            path = utils.file_from_id(self.hashid, dbdir=self.dbdir)
             self.loadDisc.loadFile(json=path)
             self.buildTitleTree(
-                *utils.load_metadata(discid=self.discid, dbdir=self.dbdir)
+                info=utils.load_metadata(
+                    self.dev,
+                    hashid=self.hashid,
+                    dbdir=self.dbdir,
+                )
             )
         else:
             self.log.info("Loading new disc")
@@ -148,7 +152,7 @@ class DiscMetadataEditor(dialogs.MyQDialog):
 
     def setWindowTitle(self):
 
-        title = f"{self.dev} [{self.discid}]"
+        title = f"{self.dev} [{self.hashid}]"
         if self.vendor and self.model:
             title = f"{self.vendor} {self.model}: {title}"
         if self.discLabel:
@@ -174,7 +178,7 @@ class DiscMetadataEditor(dialogs.MyQDialog):
         self.msgs.clear()
         self.loadDisc.loadFile(json=files[0])
         self.buildTitleTree(
-            *utils.load_metadata(fpath=files[0])
+            info=utils.load_metadata(self.dev, fpath=files[0])
         )
 
     def save(self, *args, **kwargs):
@@ -200,7 +204,6 @@ class DiscMetadataEditor(dialogs.MyQDialog):
             )
 
         titles = {}
-        sizes = {}
         root = self.titleTree.invisibleRootItem()
         for i in range(root.childCount()):
             titleObj = root.child(i)  # Get the object from the QTreeWidget
@@ -211,9 +214,6 @@ class DiscMetadataEditor(dialogs.MyQDialog):
                 return
 
             titles[titleObj.titleID] = titleObj.info
-            sizes[titleObj.titleID] = int(
-                titleObj.makeMKVInfo.get(SIZEKEY, '0')
-            )
 
         if len(titles) == 0:
             self.log.info('No titles marked for ripping!')
@@ -238,12 +238,11 @@ class DiscMetadataEditor(dialogs.MyQDialog):
         if res == message.Yes:
             utils.save_metadata(
                 info,
-                self.discid,
+                self.hashid,
                 dbdir=self.dbdir,
                 replace=True,
             )
             self.info = info
-            self.sizes = sizes
             self.done(RIP if kwargs.get('rip', False) else SAVE)
 
     def selectTitle(self, obj, col):
@@ -293,7 +292,7 @@ class DiscMetadataEditor(dialogs.MyQDialog):
         # actual current title
         self.titleMetadata.setInfo(obj.info)
 
-    def buildTitleTree(self, info=None, sizes=None):
+    def buildTitleTree(self, info=None):
 
         # Remove the progress widget from the window
         self.layout().removeWidget(self.progress)
@@ -304,7 +303,7 @@ class DiscMetadataEditor(dialogs.MyQDialog):
         titles = self.loadDisc.titles
         infoTitles = {}
         if info is not None:
-            self.discid = info['discID']
+            self.hashid = info.get('hashID', None)
             self.discMetadata.setInfo(info)
             infoTitles = info['titles']
 
@@ -370,11 +369,19 @@ class ExistingDiscOptions(dialogs.MyQDialog):
 
     """
 
-    def __init__(self, dev: str, info: dict, timeout: int = 30, parent=None):
+    def __init__(
+        self,
+        dev: str,
+        info: dict,
+        convention: str,
+        timeout: int = 30,
+        parent=None,
+    ):
         super().__init__(parent)
 
         self.dev = dev
         self._timeout = timeout
+
         qbtn = (
             QtWidgets.QDialogButtonBox.Save
             | QtWidgets.QDialogButtonBox.Open
@@ -396,6 +403,13 @@ class ExistingDiscOptions(dialogs.MyQDialog):
             self.timeout_fmt.format(self._timeout)
         )
 
+        self.convention_label = QtWidgets.QLabel('Output naming convention:')
+        self.convention_box = QtWidgets.QComboBox()
+        self.convention_box.addItems(CONVENTIONS)
+        idx = self.convention_box.findText(convention)
+        if idx != -1:
+            self.convention_box.setCurrentIndex(idx)
+
         # Set up model for table containing releases
         self.model = MyTableModel(info)
 
@@ -413,6 +427,8 @@ class ExistingDiscOptions(dialogs.MyQDialog):
         )
         layout.addWidget(self.timeout_label)
         layout.addWidget(self.table)
+        layout.addWidget(self.convention_label)
+        layout.addWidget(self.convention_box)
         layout.addWidget(self.button_box)
 
         self.setLayout(layout)
@@ -423,6 +439,10 @@ class ExistingDiscOptions(dialogs.MyQDialog):
         self._timer.timeout.connect(self._message_timeout)
         self._timer.start(1000)
         self.open()
+
+    @property
+    def convention(self) -> str:
+        return self.convention_box.currentText()
 
     def _message_timeout(self):
         self._timeout -= 1

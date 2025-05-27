@@ -10,7 +10,6 @@ import gzip
 
 from threading import Event
 from subprocess import (
-    call,
     check_output,
     Popen,
     PIPE,
@@ -20,10 +19,17 @@ from subprocess import (
 
 from PyQt5 import QtCore
 
-from . import DBDIR
+from . import DBDIR, MAKEMKVCON
 from .mkv_lookup import AP
 
 DEVICE_MSG = 'DRV:'
+SANITIZE = (
+    DEVICE_MSG,
+    'MSG:1004',
+    'MSG:2003',
+    'MSG:3338',
+)
+
 SPLIT = re.compile(r'(".*?"|[^,]+)')
 DEFAULT_KWARGS = {
     'robot': True,
@@ -36,6 +42,9 @@ DEFAULT_KWARGS = {
 SWITCHES = ('noscan', 'robot', 'decrypt')
 SOURCES = ('iso', 'file', 'disc', 'dev')
 COMMANDS = ('info', 'mkv', 'backup', 'f', 'reg')
+COMPLETE_PATTERN = 'Copy Complete'
+FAIL_PATTERN = 'Backup failed'
+BACKUP_EXISTS_PATTERN = 'already contains a backup'
 RESULTS_PREFIX = ("MSG:5004", "MSG:5037")
 
 
@@ -50,6 +59,7 @@ class MakeMKVThread(QtCore.QThread):
     # Send the dev device that failed
     FAILURE = QtCore.pyqtSignal(str)
     SUCCESS = QtCore.pyqtSignal(str)
+    CANCEL = QtCore.pyqtSignal()
 
     def __init__(
         self,
@@ -77,10 +87,12 @@ class MakeMKVThread(QtCore.QThread):
 
         super().__init__()
         self.log = logging.getLogger(__name__)
+        self.CANCEL.connect(self.cancel)
 
         self._dev = None
         self._failure = False
         self._success = False
+        self._backup_exists = False
 
         self.started = Event()
         self.command = command
@@ -173,6 +185,14 @@ class MakeMKVThread(QtCore.QThread):
         return self._check_type('dev')
 
     @property
+    def success(self) -> bool:
+        return self._success
+
+    @property
+    def failure(self) -> bool:
+        return self._failure
+
+    @property
     def dev(self):
         return self._dev
 
@@ -234,7 +254,7 @@ class MakeMKVThread(QtCore.QThread):
         #     return
 
         cmd = [
-            'makemkvcon',
+            MAKEMKVCON,
             *opts,
             self.command,
             "{}:{}".format(*self.source),
@@ -265,51 +285,38 @@ class MakeMKVThread(QtCore.QThread):
 
     def check_result(self, line: str) -> str:
 
-        # If not a result-of-rip message, return line
-        if not line.startswith(RESULTS_PREFIX):
-            return line
-
         # If already determined success/failure, return line
         if self._success or self._failure:
             return line
 
-        # Try to extact the number of success/failures from messages
-        info = [val.strip().strip('"') for val in line.split(',')]
-        try:
-            success, failure = map(int, info[-2:])
-        except Exception as err:
-            self.log.debug(
-                "%s - Failed to parse success/failure values: %s",
-                self.source[1],
-                err,
-            )
-            return line
-
-        if failure > 0:
-            self._failure = True
-            self.log.error("%s - Rip failed", self.source[1])
-            self.FAILURE.emit('{}:{}'.format(*self.source))
-        elif success > 0:
+        # If not a result-of-rip message, return line
+        if COMPLETE_PATTERN in line:
             self._success = True
             self.log.error("%s - Rip success", self.source[1])
             self.SUCCESS.emit('{}:{}'.format(*self.source))
-        else:
-            self.log.warning(
-                "%s - Ripped nothing; no success or failure reported",
-                self.source[1],
-            )
+        elif FAIL_PATTERN in line:
+            self._failure = True
+            self.log.error("%s - Rip failed", self.source[1])
+            self.FAILURE.emit('{}:{}'.format(*self.source))
+        elif BACKUP_EXISTS_PATTERN in line:
+            self._backup_exists = True
+            self.log.warning("%s - Rip failed; backup exists", self.source[1])
+
         return line
 
-    def terminate(self):
+    @QtCore.pyqtSlot()
+    def cancel(self):
         """Kill the MakeMKV Process"""
-
+        self.log.info('%s - Cancel request', self.source[1])
         if self.proc:
-            self.log.info('Killing process')
+            self.log.info('%s - Killing process', self.source[1])
             self.proc.kill()
-        super().wait()
 
 
 class MakeMKVRip(MakeMKVThread):
+
+    FINISHED = QtCore.pyqtSignal(str)
+    EJECT_DISC = QtCore.pyqtSignal()
 
     def __init__(self, command: str, pipe: str | None = None, **kwargs):
         kwargs = {
@@ -318,11 +325,17 @@ class MakeMKVRip(MakeMKVThread):
         }
 
         super().__init__(command, **kwargs)
+
+        self._result = None
+
         self.pipe = pipe or 'stderr'
 
-    def run(self):
+    @property
+    def result(self):
+        return self._result
 
-        self.makemkvcon()
+    def monitor_proc(self):
+
         if self.proc is None:
             return
 
@@ -335,12 +348,6 @@ class MakeMKVRip(MakeMKVThread):
             self.check_result(line)
         self.proc.wait()
         self.proc.communicate()
-
-        if self.dev is not None:
-            self.log.debug("%s - Ejecting disc", self.dev)
-            call(['eject', self.dev])
-
-        self.log.info("MakeMKVRip thread dead")
 
 
 class MakeMKVInfo(MakeMKVThread):
@@ -408,7 +415,9 @@ class MakeMKVInfo(MakeMKVThread):
         # output to file
         with gzip.open(self.info_path, 'wt') as fid:
             for line in iter(self.stdout.readline, ''):
-                fid.write(line)
+                fid.write(
+                    sanitize(line)
+                )
                 self.parse_line(line)
                 self.check_result(line)
         self.proc.wait()
@@ -466,6 +475,47 @@ class MakeMKVInfo(MakeMKVThread):
                 tt[stream][AP[sid]] = val.strip('"')
 
 
+def sanitize(line: str) -> str:
+    """
+    Mask out sensitive information
+
+    Masks out sensitive info in DRV messages and MSG 1004, 2003, 3338
+    from MakeMKV.
+
+    Issue #30 from TheDiscDb
+
+    Arguments:
+        line (str): Line from MakeMKV logs
+
+    Returns:
+        str: Sanititzed line from MakeMKV logs
+
+    """
+
+    if line.startswith(SANITIZE):
+        return re.sub('"[^"]*"', '"***"', line)
+
+    return line
+
+
+def sanitize_database_file(path: str):
+    """
+    path (str): Path to database file to sanitize
+
+    """
+
+    # Read in all the data
+    with gzip.open(path, mode='rt') as iid:
+        lines = iid.readlines()
+
+    # Write out sanitized data
+    with gzip.open(path, mode='wt') as oid:
+        for line in lines:
+            oid.write(
+                sanitize(line)
+            )
+
+
 def _dev_to_disc(timeout: float | int = 60.0) -> dict:
     """
     Get dict of dev devices to MakeMKV disc ids
@@ -477,7 +527,7 @@ def _dev_to_disc(timeout: float | int = 60.0) -> dict:
     output = {}
     try:
         info = check_output(
-            ['makemkvcon', '--robot', '--noscan', 'info', 'disc'],
+            [MAKEMKVCON, '--robot', '--noscan', 'info', 'disc'],
             timeout=timeout,
         )
     except TimeoutExpired as err:

@@ -8,7 +8,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "automakemkv"
-version = "3.3.1"
+version = "3.12.3"
 description = "Package for automagically ripping media with MakeMKV"
 readme = "README.md"
 authors = [
@@ -16,22 +16,27 @@ authors = [
 ]
 
 classifiers = [
-    "Operating System :: MacOS",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX",
     "Operating System :: POSIX :: Linux",
     "Programming Language :: Python",
-    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Topic :: Multimedia :: Sound/Audio",
     "Topic :: Multimedia :: Video",
 ]
 
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 
 dependencies = [
     "PyQt5",
-    "pyudev",
+    "pyudev ; platform_system == 'Linux'",
+    "pywin32 ; platform_system == 'Windows'",
+    "WMI ; platform_system == 'Windows'",
 ]
+
+[project.urls]
+Homepage = "https://github.com/kwodzicki/autoMakeMKV"
 
 [project.scripts]
 autoMakeMKV = "automakemkv.ui.main:cli"
@@ -39,3 +44,5 @@ autoMakeMKV = "automakemkv.ui.main:cli"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+automakemkv = ['resources/*.png', 'resources/*.ico']

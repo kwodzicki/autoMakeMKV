@@ -2,6 +2,7 @@
 *.swp
 
 build/
+notebooks/
 __pycache__
 *.egg-info
 

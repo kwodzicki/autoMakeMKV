@@ -5,7 +5,7 @@ Utilities for ripping titles
 
 import logging
 import sys
-from subprocess import call
+from subprocess import Popen
 
 from PyQt5 import QtCore
 
@@ -161,7 +161,7 @@ class BaseWatchdog(QtCore.QThread):
         self.log.debug("%s - Ejecting disc", dev)
 
         if sys.platform.startswith('linux'):
-            call(['eject', dev])
+            _ = Popen(['eject', dev])
         elif sys.platform.startswith('win'):
             command = f"open {dev}: type CDAudio alias drive"
             ctypes.windll.winmm.mciSendStringW(command, None, 0, None)

@@ -9,9 +9,6 @@ from subprocess import Popen
 
 from PyQt5 import QtCore
 
-if sys.platform.startswith('win'):
-    import ctypes
-
 from .. import UUID_ROOT, OUTDIR, DBDIR
 from .. import ripper
 from ..ui import dialogs
@@ -163,12 +160,10 @@ class BaseWatchdog(QtCore.QThread):
         if sys.platform.startswith('linux'):
             _ = Popen(['eject', dev])
         elif sys.platform.startswith('win'):
-            command = f"open {dev}: type CDAudio alias drive"
-            ctypes.windll.winmm.mciSendStringW(command, None, 0, None)
-            ctypes.windll.winmm.mciSendStringW(
-                "set drive door open",
-                None,
-                0,
-                None,
+            cmd = (
+                "(New-Object -comObject Shell.Application)"
+                ".NameSpace(17)"
+                f".ParseName('{dev}')"
+                ".InvokeVerb('Eject')"
             )
-            ctypes.windll.winmm.mciSendStringW("close drive", None, 0, None)
+            _ = Popen(["powershell", "-command", cmd])

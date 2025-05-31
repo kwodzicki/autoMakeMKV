@@ -56,7 +56,7 @@ class MakeMKVThread(QtCore.QThread):
 
     """
 
-    # Send the dev device that failed
+    # Send the dev device that failed and the info about disc
     FAILURE = QtCore.pyqtSignal(str)
     SUCCESS = QtCore.pyqtSignal(str)
     CANCEL = QtCore.pyqtSignal()
@@ -293,11 +293,9 @@ class MakeMKVThread(QtCore.QThread):
         if COMPLETE_PATTERN in line:
             self._success = True
             self.log.error("%s - Rip success", self.source[1])
-            self.SUCCESS.emit('{}:{}'.format(*self.source))
         elif FAIL_PATTERN in line:
             self._failure = True
             self.log.error("%s - Rip failed", self.source[1])
-            self.FAILURE.emit('{}:{}'.format(*self.source))
         elif BACKUP_EXISTS_PATTERN in line:
             self._backup_exists = True
             self.log.warning("%s - Rip failed; backup exists", self.source[1])

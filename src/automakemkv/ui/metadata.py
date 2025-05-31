@@ -377,10 +377,14 @@ class ExistingDiscOptions(dialogs.MyQDialog):
         timeout: int = 30,
         parent=None,
     ):
-        super().__init__(parent)
+        super().__init__(
+            parent=parent,
+            timeout=timeout,
+            timeout_code=RIP,
+            timeout_fmt="Disc will begin ripping in: {:>4d} seconds"
+        )
 
         self.dev = dev
-        self._timeout = timeout
 
         qbtn = (
             QtWidgets.QDialogButtonBox.Save
@@ -398,9 +402,8 @@ class ExistingDiscOptions(dialogs.MyQDialog):
             "\tIgnore: Ignore the disc and do nothing?\n"
         )
 
-        self.timeout_fmt = "Disc will begin ripping in: {:>4d} seconds"
-        self.timeout_label = QtWidgets.QLabel(
-            self.timeout_fmt.format(self._timeout)
+        self.timeout_label.setText(
+            self.timeout_fmt.format(self.timeout)
         )
 
         self.convention_label = QtWidgets.QLabel('Output naming convention:')
@@ -435,27 +438,15 @@ class ExistingDiscOptions(dialogs.MyQDialog):
         vendor, model = utils.get_vendor_model(self.dev)
         self.setWindowTitle(f"{NAME} - {vendor} {model}")
 
-        self._timer = QtCore.QTimer()
-        self._timer.timeout.connect(self._message_timeout)
-        self._timer.start(1000)
+        self.start_timer()
         self.open()
 
     @property
     def convention(self) -> str:
         return self.convention_box.currentText()
 
-    def _message_timeout(self):
-        self._timeout -= 1
-        if self._timeout > 0:
-            self.timeout_label.setText(
-                self.timeout_fmt.format(self._timeout)
-            )
-            return
-        self._timer.stop()
-        self.done(RIP)
-
     def action(self, button):
-        self._timer.stop()
+        self.stop_timer()
         if button == self.button_box.button(QtWidgets.QDialogButtonBox.Save):
             self.done(RIP)
             return

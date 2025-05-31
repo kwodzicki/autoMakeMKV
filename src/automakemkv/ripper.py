@@ -32,8 +32,10 @@ class DiscHandler(QtCore.QObject):
 
     """
 
-    FAILURE = QtCore.pyqtSignal()
-    SUCCESS = QtCore.pyqtSignal()
+    # String object is path of the output file to be created
+    FAILURE = QtCore.pyqtSignal(str)
+    SUCCESS = QtCore.pyqtSignal(str)
+
     FINISHED = QtCore.pyqtSignal()
     EJECT_DISC = QtCore.pyqtSignal()
 
@@ -492,6 +494,7 @@ class RipTitle(makemkv.MakeMKVRip):
             output (str) : Name of the output file
             info (dict): Info about tracks on the disc; needed
                 for progress window
+            fname (str): Output file name for the title
 
         Returns:
             bool : True if ripped, False otherwise
@@ -550,6 +553,7 @@ class RipTitle(makemkv.MakeMKVRip):
 
         # If bad return code or failure
         if self.returncode != 0 or self.failure:
+            self.FAILURE.emit(self.fname)
             fdirs = []
             for fname in files:
                 fdir = os.path.dirname(fname)
@@ -571,6 +575,7 @@ class RipTitle(makemkv.MakeMKVRip):
             return False
 
         if len(files) == 0:
+            self.FAILURE.emit(self.fname)
             self.log.error(
                 "%s - Something went wrong, no output file found!",
                 self.dev,
@@ -578,11 +583,13 @@ class RipTitle(makemkv.MakeMKVRip):
             return False
 
         if len(files) > 1:
+            self.FAILURE.emit(self.fname)
             self.log.error("%s - Too many output files: %s", self.dev, files)
             for fname in files:
                 os.remove(fname)
             return False
 
+        self.SUCCESS.emit(self.fname)
         self.log.info(
             "%s - Renaming file '%s' ---> '%s'",
             self.dev,
@@ -627,11 +634,12 @@ class RipDisc(makemkv.MakeMKVRip):
 
         """
 
+        output = info.get('title', 'image')
         super().__init__(
             'backup',
             dev=dev,
             decrypt=True,
-            output=os.path.join(tmpdir, 'image.iso'),
+            output=os.path.join(tmpdir, f'{output}.iso'),
         )
 
         self.progress = progress
@@ -685,6 +693,7 @@ class RipDisc(makemkv.MakeMKVRip):
 
         # If bad return code or failure
         if self.returncode != 0 or self.failure:
+            self.FAILURE.emit(self.output)
             self.log.warning("%s - Error backing up disc", self.dev)
 
             try:
@@ -696,6 +705,7 @@ class RipDisc(makemkv.MakeMKVRip):
             self.log.debug("%s - Removed dir: %s", self.dev, self.output)
             return False
 
+        self.SUCCESS.emit(self.output)
         return True
 
 
@@ -784,6 +794,7 @@ class ExtractFromDVD(makemkv.MakeMKVRip):
 
         # If there was an error during extration
         if self.returncode != 0 or self.failure:
+            self.FAILURE.emit(output)
             self.log.warning(
                 "%s - Failed to extract title %s from backup",
                 self.src,
@@ -797,6 +808,7 @@ class ExtractFromDVD(makemkv.MakeMKVRip):
 
         # If number of files found is different that one (1)
         if len(files) != 1:
+            self.FAILURE.emit(output)
             self.log.error("%s - Too many output files!", self.src)
             for fname in files:
                 os.remove(fname)
@@ -817,6 +829,8 @@ class ExtractFromDVD(makemkv.MakeMKVRip):
 
         # Rename the file
         os.rename(files[0], output)
+
+        self.SUCCESS.emit(output)
 
         return True
 
@@ -912,6 +926,7 @@ class ExtractFromBluRay(QtCore.QThread):
             .get('Source FileName', None)
         )
         if title_src is None:
+            self.FAILURE.emit(output)
             self.log.error(
                 "%s - Failed to find playlist name for title '%s', "
                 "skipping.",
@@ -926,6 +941,7 @@ class ExtractFromBluRay(QtCore.QThread):
         elif title_src.endswith(STREAM_EXT):
             title_src = os.path.join(self.src, *STREAM_DIR, title_src)
         else:
+            self.FAILURE.emit(output)
             self.log.warning(
                 "%s - File not currently supported: %s",
                 self.src,
@@ -950,5 +966,7 @@ class ExtractFromBluRay(QtCore.QThread):
         self.progress.MKV_CUR_TRACK.emit(self.src, self.title)
         self.progress.MKV_NEW_PROCESS.emit(self.src, self.proc, 'stdout')
         self.proc.wait()
+
+        self.SUCCESS.emit(output)
 
         return True

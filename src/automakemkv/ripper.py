@@ -113,13 +113,11 @@ class DiscHandler(QtCore.QObject):
 
         self.discid = utils.get_discid(dev, root)  # This is pretty quick
 
-        # We compute disc hash in thread to keep the GUI alive.
-        # When finished will trigger the disc_lookup method,
-        # passing in the disc hash
-        mnt = utils.dev_to_mount(dev)
-        self.hashid = disc_hash.DiscHasher(mnt)
-        self.hashid.FINISHED.connect(self.disc_lookup)
-        self.hashid.start()
+        # Finding mount point can take a little bit, so we do in thread.
+        # On windows, this thread should finish right away
+        self.dev_to_mnt = utils.DevToMount(dev)
+        self.dev_to_mnt.FINISHED.connect(self.found_mount_point)
+        self.dev_to_mnt.start()
 
     @property
     def hash(self) -> str | None:
@@ -160,6 +158,39 @@ class DiscHandler(QtCore.QObject):
         if self.extractor is not None:
             self.log.debug("%s - Cancelling extractor", dev)
             self.extractor.CANCEL.emit()
+
+    @QtCore.pyqtSlot(str)
+    def found_mount_point(self, mnt: str) -> None:
+        """
+        Callback for mount point found
+
+        On windows, the 'dev' device is the mount point, so it takes no time
+        to look that up. However, on Linux, everything is done by /dev/
+        device and udev events for a disc insert can come before the disc is
+        fully mounted to a path. So, there are tries/retries that occur when
+        trying to deteremine the mount point from the /dev/ device. This is
+        done in a QThread so as to not block GUI operations.
+
+        When the search is finished, the objects FINISHED signal is emitted,
+        calling this method to set up a DiscHash lookup.
+
+        Arguments:
+            mnt (str): The mount point of the disc. If no mount point
+                determined, this will be an empty string
+
+        """
+
+        # Clean up the thread object for mount point lookup
+        self.dev_to_mnt.deleteLater()
+        self.dev_to_mnt = None
+
+        # We compute disc hash in thread to keep the GUI alive.
+        # When finished will trigger the disc_lookup method,
+        # passing in the disc hash
+        mnt = None if mnt == '' else mnt
+        self.hashid = disc_hash.DiscHasher(mnt)
+        self.hashid.FINISHED.connect(self.disc_lookup)
+        self.hashid.start()
 
     @QtCore.pyqtSlot(str)
     def disc_lookup(self, hashid: str):
@@ -251,23 +282,24 @@ class DiscHandler(QtCore.QObject):
     @QtCore.pyqtSlot(int)
     def handle_metadata(self, result: int) -> None:
         """
-        Rip a whole disc
+        Main handler for options and metadata events
 
-        Given information about a disc, rip
-        all tracks. Intended to be run as thread
-        so watchdog can keep looking for new discs
+        When a disc is inserted, if it is in the database and options window
+        is presented asking how to handle the disc. If the disc is not in the
+        database, then a dialog for tagging the disc is presented. When either
+        of those windows is closed, the method is used as a callback for how
+        to handle the user's selection.
+
+        The value passed into this fuction is one of any number of integers
+        (set in the metadata.py module) signaling what to do.
 
         Arguments:
-            dev (str) : Device to rip from
-            root (str) : Location of the 'by-uuid' directory
-                where discs are mounted. This is used to
-                get the unique ID of the disc.
-            outdir (str) : Directory to save mkv files to
-            extras (bool) : Flag for if should rip extras
+            result (int): Return code from options or metadata dialog for how
+                to process the disc
 
         """
 
-        # Clean up any windows that are hanging around
+        # Clean up options windows if it was used
         if self.options is not None:
             # Get convention from window; we update the attribute because
             # if they changed it and then opened to edit metadata, the
@@ -276,6 +308,14 @@ class DiscHandler(QtCore.QObject):
             self.log.debug("%s - Cleaning up the options window", self.dev)
             self.options.deleteLater()
             self.options = None
+
+        # If metadata attribute is not None, then must be new disc or
+        # the user edited/updated something
+        if self.metadata is not None:
+            self.log.debug("%s - Cleaning up the metadata window", self.dev)
+            self.info = self.metadata.info
+            self.metadata.deleteLater()
+            self.metadata = None
 
         # Check the "return" status of the dialog
         if result == metadata.IGNORE:
@@ -294,14 +334,6 @@ class DiscHandler(QtCore.QObject):
             self.EJECT_DISC.emit()
             self.FINISHED.emit()
             return
-
-        # If metadata attribute is not None, then must be new disc or
-        # the user edited/updated something
-        if self.metadata is not None:
-            self.log.debug("%s - Cleaning up the metadata window", self.dev)
-            self.info = self.metadata.info
-            self.metadata.deleteLater()
-            self.metadata = None
 
         # If we want to backup, then reopen metadata for tagging
         if result == metadata.BACKUP_THEN_TAG:
@@ -476,6 +508,9 @@ class DiscHandler(QtCore.QObject):
                     self.info,
                     self.progress
                 )
+
+            self.extractor.FAILURE.connect(self.FAILURE.emit)
+            self.extractor.SUCCESS.connect(self.SUCCESS.emit)
             self.extractor.FINISHED.connect(self.extract_title)
             self.extractor.start()
 

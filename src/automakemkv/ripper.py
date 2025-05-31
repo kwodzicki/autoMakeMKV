@@ -79,6 +79,7 @@ class DiscHandler(QtCore.QObject):
         self.EXTRACT_TITLE.connect(self.extract_title)
 
         self._cancelled = False
+
         self.backup_path = None
         self.paths = {}
 
@@ -222,6 +223,31 @@ class DiscHandler(QtCore.QObject):
         )
         self.metadata.FINISHED.connect(self.handle_metadata)
 
+    @QtCore.pyqtSlot(str)
+    def backup_then_tag(self, backup_path: str):
+        """
+        Arguments:
+            backup_path (str): Path to the disc backup
+
+        """
+
+        success = self.ripper.result
+        self.progress.MKV_REMOVE_DISC.emit(self.dev)
+        if not success:
+            self.log.warning("Backup failed, not opening metadata window!")
+            self.FINISHED.emit()
+            return
+
+        self.backup_path = backup_path
+        self.metadata = metadata.DiscMetadataEditor(
+            self.dev,
+            self.hashid,
+            self.dbdir,
+            load_existing=True,
+            backed_up=True,
+        )
+        self.metadata.FINISHED.connect(self.handle_metadata)
+
     @QtCore.pyqtSlot(int)
     def handle_metadata(self, result: int) -> None:
         """
@@ -277,6 +303,21 @@ class DiscHandler(QtCore.QObject):
             self.metadata.deleteLater()
             self.metadata = None
 
+        # If we want to backup, then reopen metadata for tagging
+        if result == metadata.BACKUP_THEN_TAG:
+            self.ripper = RipDisc(
+                self.dev,
+                self.info,
+                self.tmpdir,
+                self.progress,
+            )
+            self.ripper.FAILURE.connect(self.FAILURE.emit)
+            self.ripper.SUCCESS.connect(self.SUCCESS.emit)
+            self.ripper.EJECT_DISC.connect(self.EJECT_DISC.emit)
+            self.ripper.FINISHED.connect(self.backup_then_tag)
+            self.ripper.start()
+            return
+
         # Initialize ripper object
         if result != metadata.RIP:
             self.log.error("%s - Unrecognized option: %d", self.dev, result)
@@ -308,6 +349,12 @@ class DiscHandler(QtCore.QObject):
         for title in title_nums:
             if title not in self.paths:
                 _ = self.info['titles'].pop(title)
+
+        # If backup_path is set, then we did a backup then tag event, so disc
+        # is already backed up and we need to extract titles.
+        if self.backup_path is not None:
+            self.rip_finished(self.backup_path)
+            return
 
         self.log.debug(
             "%s - Creating temporary directory : '%s'",
@@ -634,7 +681,10 @@ class RipDisc(makemkv.MakeMKVRip):
 
         """
 
-        output = info.get('title', 'image')
+        output = info.get('title', '')
+        if output == '':
+            output = 'image'
+
         super().__init__(
             'backup',
             dev=dev,
@@ -841,6 +891,8 @@ class ExtractFromBluRay(QtCore.QThread):
 
     """
 
+    FAILURE = QtCore.pyqtSignal(str)
+    SUCCESS = QtCore.pyqtSignal(str)
     FINISHED = QtCore.pyqtSignal(str)
 
     def __init__(self, src: str, paths: dict, info: dict, progress):

@@ -13,6 +13,7 @@ from . import progress
 
 SIZEKEY = 'Disk Size (Bytes)'
 
+BACKUP_THEN_TAG = 4
 RIP = 3
 SAVE = 2
 OPEN = 1
@@ -30,6 +31,7 @@ class DiscMetadataEditor(dialogs.MyQDialog):
         dbdir: str,
         *args,
         load_existing: bool = False,
+        backed_up: bool = False,
         **kwargs,
     ):
 
@@ -56,9 +58,14 @@ class DiscMetadataEditor(dialogs.MyQDialog):
         self.infoBox = QtWidgets.QTextEdit()
         self.msgs = QtWidgets.QTextEdit()
         self.save_but = QtWidgets.QPushButton('Save && Eject')
+        self.backup_tag = QtWidgets.QPushButton('Backup Then Tag')
         self.rip_but = QtWidgets.QPushButton('Save && Rip')
+
         self.save_but.clicked.connect(self.save)
         self.save_but.setEnabled(False)
+
+        self.backup_tag.clicked.connect(self.backup_then_tag)
+        self.backup_tag.setEnabled(False)
 
         self.rip_but.clicked.connect(
             lambda *args, **kwargs: self.save(*args, rip=True, **kwargs)
@@ -81,7 +88,10 @@ class DiscMetadataEditor(dialogs.MyQDialog):
         layout.addWidget(self.msgs, 3, 0, 1, 2)
         layout.addWidget(self.progress, 4, 0, 1, 2)
         layout.addWidget(self.save_but, 5, 0, 1, 2)
-        layout.addWidget(self.rip_but, 6, 0, 1, 2)
+        # If disc has NOT been backed up, then add button
+        if not backed_up:
+            layout.addWidget(self.backup_tag, 6, 0, 1, 2)
+        layout.addWidget(self.rip_but, 7, 0, 1, 2)
 
         layout.setMenuBar(
             self._initMenu()
@@ -245,6 +255,48 @@ class DiscMetadataEditor(dialogs.MyQDialog):
             self.info = info
             self.done(RIP if kwargs.get('rip', False) else SAVE)
 
+    def backup_then_tag(self, *args, **kwargs):
+        """
+        Backup the disc, then reopen for tagging
+
+        If it is unclear what titles are what on the disc, namely for Blu-ray
+        discs, we can backup the disc and then inspect the various files and
+        playlists to determine what is what. Then, we can use that information
+        to tag the disc and extract what we want!
+
+        """
+        self.log.debug('Saving data JSON')
+
+        info = self.discMetadata.getInfo()
+        if info is None:
+            self.log.debug('No disc metadata')
+            return
+
+        info['titles'] = {}  # Empty titles for now
+
+        message = QtWidgets.QMessageBox()
+        res = message.question(
+                self,
+                '',
+                'Are you sure you want to run a full disc backup and then '
+                'tag the metadata afterwards?\n\n'
+                'This option is useful when it is unclear which title is '
+                'which, allowing you to inspect the backup while tagging '
+                'the disc.\n\n'
+                'Note that titles will simply be extracted from disc after '
+                'metadata is entered; no need to re-backup the disc.',
+                message.Yes | message.No
+        )
+        if res == message.Yes:
+            utils.save_metadata(
+                info,
+                self.hashid,
+                dbdir=self.dbdir,
+                replace=True,
+            )
+            self.info = info
+            self.done(BACKUP_THEN_TAG)
+
     def selectTitle(self, obj, col):
         """
         Run when object in Tree is selected
@@ -294,9 +346,11 @@ class DiscMetadataEditor(dialogs.MyQDialog):
 
     def buildTitleTree(self, info=None):
 
-        # Remove the progress widget from the window
-        self.layout().removeWidget(self.progress)
-        self.progress.deleteLater()
+        # Remove the progress widget from the window if exists
+        if self.progress is not None:
+            self.layout().removeWidget(self.progress)
+            self.progress.deleteLater()
+            self.progress = None
 
         self.titleTree.clear()
         discInfo = self.loadDisc.discInfo
@@ -345,9 +399,9 @@ class DiscMetadataEditor(dialogs.MyQDialog):
 
         # Run given method one object in QTreeWidget is clicked
         self.titleTree.currentItemChanged.connect(self.selectTitle)
-        # Enable 'Apply' Button after the tree is populated
+        # Enable buttons after the tree is populated
         self.save_but.setEnabled(True)
-        # Enable 'Apply' Button after the tree is populated
+        self.backup_tag.setEnabled(True)
         self.rip_but.setEnabled(True)
 
 
@@ -486,6 +540,7 @@ class MyTableModel(QtCore.QAbstractTableModel):
         ]
 
         self.columns = None
+        self._data = []
         self._build_data()
 
     def _build_data(self):
@@ -508,7 +563,7 @@ class MyTableModel(QtCore.QAbstractTableModel):
         for title in self.info.get('titles', {}).values():
             data.append(func(title))
 
-        self.data = data
+        self._data.extend(data)
 
     def _series_info(self, title):
 
@@ -542,16 +597,18 @@ class MyTableModel(QtCore.QAbstractTableModel):
             return ""
 
     def columnCount(self, parent=None):
-        return len(self.data[0])
+        if self.rowCount() == 0:
+            return 0
+        return len(self._data[0])
 
     def rowCount(self, parent=None):
-        return len(self.data)
+        return len(self._data)
 
     def data(self, index: QtCore.QModelIndex, role: int):
         if role == QtCore.Qt.DisplayRole:
             row = index.row()
             col = index.column()
-            return str(self.data[row][col])
+            return str(self._data[row][col])
 
 
 def check_info(parent, info: dict):

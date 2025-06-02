@@ -6,7 +6,7 @@ from PyQt5 import QtCore
 
 from . import UUID_ROOT, LABEL_ROOT, HOMEDIR
 
-TIMEOUT = 20.0  # Timeout to wait for disc to mount
+TIMEOUT = 60.0  # Timeout to wait for disc to mount
 
 
 def get_discid(discDev: str, root: str = UUID_ROOT, **kwargs) -> str | None:

@@ -79,6 +79,7 @@ class DiscHandler(QtCore.QObject):
         self.EXTRACT_TITLE.connect(self.extract_title)
 
         self._cancelled = False
+        self._delay_eject = False  # used during backup then tag
 
         self.backup_path = None
         self.paths = {}
@@ -337,11 +338,13 @@ class DiscHandler(QtCore.QObject):
 
         # If we want to backup, then reopen metadata for tagging
         if result == metadata.BACKUP_THEN_TAG:
+            self._delay_eject = True
             self.ripper = RipDisc(
                 self.dev,
                 self.info,
                 self.tmpdir,
                 self.progress,
+                eject=False,  # Do NOT eject when doing backup then tag
             )
             self.ripper.FAILURE.connect(self.FAILURE.emit)
             self.ripper.SUCCESS.connect(self.SUCCESS.emit)
@@ -464,6 +467,11 @@ class DiscHandler(QtCore.QObject):
             except Exception:
                 pass
             self.FINISHED.emit()
+
+        # If eject was delayed, run eject now
+        if self._delay_eject:
+            self.log.debug('%s - Running delayed eject', self.dev)
+            self.EJECT_DISC.emit()
 
     @QtCore.pyqtSlot(str)
     def extract_title(self, previous_output: str) -> None:
@@ -701,6 +709,7 @@ class RipDisc(makemkv.MakeMKVRip):
         info: dict,
         tmpdir: str,
         progress,
+        eject: bool = True,
     ):
         """
         Rip a given title from a disc
@@ -727,6 +736,7 @@ class RipDisc(makemkv.MakeMKVRip):
             output=os.path.join(tmpdir, f'{output}.iso'),
         )
 
+        self._eject = eject
         self.progress = progress
         self.progress.MKV_ADD_DISC.emit(self.dev, info, True)
 
@@ -759,7 +769,6 @@ class RipDisc(makemkv.MakeMKVRip):
         """
 
         self.log.debug('%s - Running rip disc', self.dev)
-
         # Start process for backup
         self.makemkvcon()
 
@@ -773,8 +782,9 @@ class RipDisc(makemkv.MakeMKVRip):
         # Wait for process to finish
         self.monitor_proc()
 
-        # Eject the disc
-        self.EJECT_DISC.emit()
+        # Eject the disc if _eject set
+        if self._eject:
+            self.EJECT_DISC.emit()
 
         # If bad return code or failure
         if self.returncode != 0 or self.failure:
@@ -1054,6 +1064,9 @@ class ExtractFromBluRay(QtCore.QThread):
         self.progress.MKV_NEW_PROCESS.emit(self.src, self.proc, 'stdout')
         self.proc.wait()
 
-        self.SUCCESS.emit(output)
+        if self.proc.returncode != 0:
+            self.FAILURE.emit(output)
+            return False
 
+        self.SUCCESS.emit(output)
         return True

@@ -76,7 +76,8 @@ class MyQDialog(QtWidgets.QDialog):
         self._timeout_code = timeout_code
         self._timeout_fmt = timeout_fmt
 
-        if (self.timeout is not None
+        if (
+            self.timeout is not None
             and (self.timeout_code is None or self.timeout_fmt is None)
         ):
             raise ValueError(

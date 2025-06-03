@@ -6,7 +6,6 @@ Utilities for ripping titles
 import logging
 import os
 import shutil
-import time
 import subprocess
 
 from PyQt5 import QtCore
@@ -17,12 +16,14 @@ from . import disc_hash
 from . import makemkv
 from . import path_utils
 from .ui import metadata
+from .ui.dialogs import BackupExists
 
 SIZE_POLL = 10
 PLAYLIST_DIR = ('BDMV', 'PLAYLIST')
 PLAYLIST_EXT = '.mpls'
 STREAM_DIR = ('BDMV', 'STREAM')
 STREAM_EXT = '.m2ts'
+BACKUP_FILE = 'image.iso'
 MAKEMKV_SETTINGS = utils.load_makemkv_settings()
 
 
@@ -109,8 +110,7 @@ class DiscHandler(QtCore.QObject):
             tmpdir = os.path.basename(dev)
         else:
             tmpdir = drive.rstrip(":") + "_drive"
-        tmpdir = f"{tmpdir}_{time.monotonic_ns()}"
-        self.tmpdir = os.path.join(outdir, tmpdir)
+        self._tmpdir = os.path.join(outdir, tmpdir)
 
         self.discid = utils.get_discid(dev, root)  # This is pretty quick
 
@@ -124,6 +124,12 @@ class DiscHandler(QtCore.QObject):
     def hash(self) -> str | None:
         return self.hashid or self.discid
 
+    @property
+    def tmpdir(self) -> str:
+        if self.hash is None:
+            return self._tmpdir
+        return f"{self._tmpdir}_{self.hash}"
+
     def isRunning(self):
         """
         Check if is running
@@ -133,6 +139,20 @@ class DiscHandler(QtCore.QObject):
         if self.ripper is not None:
             return self.ripper.isRunning()
         return False
+
+    def use_existing_backup(self, output: str) -> bool:
+        """
+        Returns:
+            bool: If true, then use the existing backup, else create new
+
+        """
+
+        # If output doesn't exist, then return False; i.e., new backup
+        if not os.path.exists(output):
+            return False
+
+        dlg = BackupExists(output)
+        return dlg.exec_()  # Return True if using existing, False otherwise
 
     @QtCore.pyqtSlot(str)
     def cancel(self, dev: str):
@@ -338,11 +358,19 @@ class DiscHandler(QtCore.QObject):
 
         # If we want to backup, then reopen metadata for tagging
         if result == metadata.BACKUP_THEN_TAG:
+            output = os.path.join(self.tmpdir, BACKUP_FILE)
+            if self.use_existing_backup(output):
+                raise Exception('using existing')
+                # If using existing, then call method and then return
+                self.rip_finished(output)
+                return
+
+            raise Exception("Creating new")
             self._delay_eject = True
             self.ripper = RipDisc(
                 self.dev,
                 self.info,
-                self.tmpdir,
+                output,
                 self.progress,
                 eject=False,  # Do NOT eject when doing backup then tag
             )
@@ -412,10 +440,18 @@ class DiscHandler(QtCore.QObject):
                 self.progress,
             )
         else:
+            output = os.path.join(self.tmpdir, BACKUP_FILE)
+            if self.use_existing_backup(output):
+                raise Exception("Using Existing")
+                # If using existing, then call method and then return
+                self.rip_finished(output)
+                return
+
+            raise Exception("Creating New")
             self.ripper = RipDisc(
                 self.dev,
                 self.info,
-                self.tmpdir,
+                output,
                 self.progress,
             )
 
@@ -444,8 +480,11 @@ class DiscHandler(QtCore.QObject):
 
         """
 
-        self.ripper.wait()  # This "shouldn't" take too long
-        success = self.ripper.result
+        success = True
+        if self.ripper is not None:
+            self.ripper.wait()  # This "shouldn't" take too long
+            success = self.ripper.result
+
         self.progress.MKV_REMOVE_DISC.emit(self.dev)
         if success:
             # If RipTitle instance, then we are done
@@ -457,8 +496,10 @@ class DiscHandler(QtCore.QObject):
                 self.EXTRACT_TITLE.emit('')
 
         self.log.debug("%s - Cleaning up the ripper thread", self.dev)
-        self.ripper.deleteLater()
-        self.ripper = None
+
+        if self.ripper is not None:
+            self.ripper.deleteLater()
+            self.ripper = None
 
         # IF failed, then emit FINISHED for cleanup
         if not success:
@@ -707,7 +748,7 @@ class RipDisc(makemkv.MakeMKVRip):
         self,
         dev: str,
         info: dict,
-        tmpdir: str,
+        output: str,
         progress,
         eject: bool = True,
     ):
@@ -725,15 +766,11 @@ class RipDisc(makemkv.MakeMKVRip):
 
         """
 
-        output = info.get('title', '')
-        if output == '':
-            output = 'image'
-
         super().__init__(
             'backup',
             dev=dev,
             decrypt=True,
-            output=os.path.join(tmpdir, f'{output}.iso'),
+            output=output,
         )
 
         self._eject = eject
@@ -769,6 +806,16 @@ class RipDisc(makemkv.MakeMKVRip):
         """
 
         self.log.debug('%s - Running rip disc', self.dev)
+
+        # If output already exists, then delete it
+        if os.path.exists(self.output):
+            try:
+                os.remove(self.output)
+            except IsADirectoryError:
+                shutil.rmtree(self.output)
+            except FileNotFoundError:
+                pass
+
         # Start process for backup
         self.makemkvcon()
 

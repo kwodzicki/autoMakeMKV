@@ -38,6 +38,56 @@ class MissingDirDialog(QtWidgets.QDialog):
         self.setLayout(self.layout)
 
 
+class BackupExists(QtWidgets.QDialog):
+    def __init__(self, output: str, name: str = NAME):
+        super().__init__()
+
+        self._name = name
+        self.setWindowTitle(f"{self._name}: {output} Backup exists!")
+
+        self.buttonBox = QtWidgets.QDialogButtonBox()
+
+        # Create custom buttons
+        use_existing = QtWidgets.QPushButton("Use Existing")
+        use_existing.setToolTip(
+            "Extract titles from existing backup. "
+            "May fail if backup was incomplete"
+        )
+
+        new_backup = QtWidgets.QPushButton("Create New Backup")
+        new_backup.setToolTip("Remove old existing backup and create new one")
+
+        # Add buttons to the button box with specific roles
+        self.buttonBox.addButton(
+            use_existing,
+            QtWidgets.QDialogButtonBox.AcceptRole,
+        )
+        self.buttonBox.addButton(
+            new_backup,
+            QtWidgets.QDialogButtonBox.RejectRole,
+        )
+
+        # Connect signals
+        self.buttonBox.accepted.connect(self.accept)
+        self.buttonBox.rejected.connect(self.reject)
+
+        self.layout = QtWidgets.QVBoxLayout()
+        message = (
+            "It looks like there may already be a backup image at:",
+            os.linesep,
+            output,
+            os.linesep,
+            "Would you like to try to extract titles from it (Use Existing)",
+            "or would you like to create a fresh backup (Create New Backup)?",
+        )
+        message = QtWidgets.QLabel(
+            os.linesep.join(message)
+        )
+        self.layout.addWidget(message)
+        self.layout.addWidget(self.buttonBox)
+        self.setLayout(self.layout)
+
+
 class MyQDialog(QtWidgets.QDialog):
     """
     Overload done() and new signal

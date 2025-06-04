@@ -95,6 +95,7 @@ class DiscHandler(QtCore.QObject):
         self.progress = progress
         self.progress.CANCEL.connect(self.cancel)
 
+        self.disc_hasher = None
         self.options = None
         self.metadata = None
         self.ripper = None
@@ -112,6 +113,7 @@ class DiscHandler(QtCore.QObject):
             tmpdir = drive.rstrip(":") + "_drive"
         self._tmpdir = os.path.join(outdir, tmpdir)
 
+        self.hashid = None
         self.discid = utils.get_discid(dev, root)  # This is pretty quick
 
         # Finding mount point can take a little bit, so we do in thread.
@@ -209,9 +211,9 @@ class DiscHandler(QtCore.QObject):
         # When finished will trigger the disc_lookup method,
         # passing in the disc hash
         mnt = None if mnt == '' else mnt
-        self.hashid = disc_hash.DiscHasher(mnt)
-        self.hashid.FINISHED.connect(self.disc_lookup)
-        self.hashid.start()
+        self.disc_hasher = disc_hash.DiscHasher(mnt)
+        self.disc_hasher.FINISHED.connect(self.disc_lookup)
+        self.disc_hasher.start()
 
     @QtCore.pyqtSlot(str)
     def disc_lookup(self, hashid: str):
@@ -226,8 +228,9 @@ class DiscHandler(QtCore.QObject):
 
         """
 
-        self.hashid.wait()  # Should be quick as FINISHED is at end of thread
-        self.hashid.deleteLater()
+        if self.disc_hasher is not None:
+            self.disc_hasher.wait()  # Should be quick
+            self.disc_hasher.deleteLater()
 
         # If hash is an emtpy string, then ensure that attribute is None
         self.hashid = hashid if hashid != '' else None
@@ -360,12 +363,10 @@ class DiscHandler(QtCore.QObject):
         if result == metadata.BACKUP_THEN_TAG:
             output = os.path.join(self.tmpdir, BACKUP_FILE)
             if self.use_existing_backup(output):
-                raise Exception('using existing')
                 # If using existing, then call method and then return
                 self.rip_finished(output)
                 return
 
-            raise Exception("Creating new")
             self._delay_eject = True
             self.ripper = RipDisc(
                 self.dev,
@@ -442,12 +443,10 @@ class DiscHandler(QtCore.QObject):
         else:
             output = os.path.join(self.tmpdir, BACKUP_FILE)
             if self.use_existing_backup(output):
-                raise Exception("Using Existing")
                 # If using existing, then call method and then return
                 self.rip_finished(output)
                 return
 
-            raise Exception("Creating New")
             self.ripper = RipDisc(
                 self.dev,
                 self.info,

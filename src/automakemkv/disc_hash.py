@@ -57,7 +57,7 @@ class DiscHasher(QtCore.QThread):
             if item.endswith(ext)
         ]
 
-        attempts = 3
+        attempts = 10
         while attempts > 0:
             sizes = None
             attempts -= 1

@@ -1,6 +1,7 @@
 import logging
 
 import os
+import re
 import json
 import gzip
 
@@ -8,6 +9,7 @@ import gzip
 def thediscdb_to_automakemkv(
     thediscdb_path: str,
     automakemkv_path: str | None = None,
+    update: bool = False,
 ) -> None:
     """
     Batch convert TheDiscDB to autoMakeMKV
@@ -31,7 +33,7 @@ def thediscdb_to_automakemkv(
     for res in find_match(thediscdb_path):
         if res is None:
             continue
-        metadata, release, titles, mkvdump = res
+        path, metadata, release, titles, mkvdump = res
         outbase = os.path.join(
             automakemkv_path,
             titles['ContentHash']
@@ -41,13 +43,14 @@ def thediscdb_to_automakemkv(
 
         log.info(mkvdump)
         log.info(metafile)
-        if os.path.isfile(metafile):
+        if os.path.isfile(metafile) and not update:
             log.warning(
                 'Metadata file alread exists "%s"; Skipping!',
                 metafile,
             )
             continue
 
+        print('Working on:', path) 
         new_meta = convert_metadata(metadata, release, titles)
         with open(metafile, mode='w') as oid:
             json.dump(new_meta, oid, indent=4)
@@ -172,9 +175,30 @@ def parse_title(disc_meta: dict, title: dict) -> dict:
         converted['episodeTitle'] = item.get('Title', '')
         return converted
 
+    item_title = item.get('Title', '')
+    mm = re.search(r'\(([^\)]*)\)', item_title)  # Search for edition info
     # If here, then has to be a movie; update some more data
     if ttype in ('DeletedScene', 'Trailer', 'Extra'):
-        converted['extraTitle'] = item.get('Title', '')
+        converted['extraTitle'] = item_title
+    elif mm is not None:
+        # Title may have extra info in it (edition like Director's Cut).
+        # Use regex to search for pattern, but ask user about if is edition
+        # info or just part of the name
+        print(
+            f'The item "{item_title}" may have edition info in the title.'
+        )
+        print(
+            f'Is the information "{mm.group(1)}" info about an edition? '
+            " E.g., Director's Cut, Extended Edition, etc."
+        ) 
+        resp = input('YES/no: ')
+        if resp != 'YES':
+            print(f"You entered '{resp}', assuming part of title.")
+        else:
+            print("Updating information to specify edition...")
+            converted['extraTitle'] = mm.group(1)
+            converted['title'] = item_title.replace(mm.group(0), '').rstrip()
+        print()
 
     return converted
 
@@ -249,6 +273,6 @@ def find_match(base: str, content_hash: str | None = None) -> tuple | None:
             with open(metadata, mode='r') as iid:
                 metadata = json.load(iid)
 
-            yield metadata, release, titles, mkvdump
+            yield path, metadata, release, titles, mkvdump
             if isinstance(content_hash, str):
                 return

@@ -120,7 +120,7 @@ class DiscMetadataEditor(dialogs.MyQDialog):
                     dbdir=self.dbdir,
                 )
             )
-        else:
+        elif dev != '':
             self.log.info("Loading new disc")
             self.loadDisc.start()
             self.loadDisc.started.wait()

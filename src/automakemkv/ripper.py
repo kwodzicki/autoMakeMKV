@@ -82,6 +82,8 @@ class DiscHandler(QtCore.QObject):
         self._cancelled = False
         self._delay_eject = False  # used during backup then tag
 
+        self.cleanup = True
+
         self.backup_path = None
         self.paths = {}
 
@@ -568,31 +570,32 @@ class DiscHandler(QtCore.QObject):
         self.extractor = None
         self.progress.MKV_REMOVE_DISC.emit(self.backup_path)
 
-        self.log.debug(
-            "%s - Removing temporary directory: %s",
-            self.dev,
-            self.tmpdir,
-        )
+        if self.cleanup:
+            # Attempt to remove the backup (tmp) file
+            self.log.debug(
+                "%s - Removing temporary directory: %s",
+                self.dev,
+                self.tmpdir,
+            )
 
-        # Attempt to remove the backup (tmp) file
-        if os.path.isdir(self.tmpdir):
-            try:
-                shutil.rmtree(self.tmpdir)
-            except Exception as err:
-                self.log.warning(
-                    "Failed to remove directory '%s': %s",
-                    self.tmpdir,
-                    err,
-                )
-        elif os.path.isfile(self.tmpdir):
-            try:
-                os.remove(self.tmpdir)
-            except Exception as err:
-                self.log.warning(
-                    "Failed to remove file '%s': %s",
-                    self.tmpdir,
-                    err,
-                )
+            if os.path.isdir(self.tmpdir):
+                try:
+                    shutil.rmtree(self.tmpdir)
+                except Exception as err:
+                    self.log.warning(
+                        "Failed to remove directory '%s': %s",
+                        self.tmpdir,
+                        err,
+                    )
+            elif os.path.isfile(self.tmpdir):
+                try:
+                    os.remove(self.tmpdir)
+                except Exception as err:
+                    self.log.warning(
+                        "Failed to remove file '%s': %s",
+                        self.tmpdir,
+                        err,
+                    )
 
         # Emit FINISHED to ensure cleanup of the object
         self.FINISHED.emit()

@@ -69,19 +69,27 @@ class DevToMount(QtCore.QThread):
         t0 = time.monotonic()
         t1 = t0 + TIMEOUT
 
+        # While we have not timed out
         while t0 < t1:
+            # Iterate over all items in the root dir
             for item in os.listdir(self.root):
+                # Get the real path of the item
                 path = os.path.realpath(os.path.join(self.root, item))
                 if path != self.dev:
                     continue
 
-                path = os.path.join('/media', uname, item)
-                try:
-                    _ = os.listdir(path)
-                except Exception:
-                    break
-
-                return path
+                # We try 2 different item values; original and escaped
+                for i in range(2):
+                    if i == 1:  # If second loop, then escape the string
+                        item = item.encode().decode('unicode_escape')
+                    # Build full path to what should be mount path
+                    path = os.path.join('/media', uname, item)
+                    try:
+                        _ = os.listdir(path)
+                    except Exception:
+                        pass
+                    else:
+                        return path
 
             time.sleep(3.0)
             t0 = time.monotonic()

@@ -16,7 +16,7 @@ from . import disc_hash
 from . import makemkv
 from . import path_utils
 from .ui import metadata
-from .ui.dialogs import BackupExists
+from .ui.dialogs import BackupExists, DiscHashFailure
 
 SIZE_POLL = 10
 PLAYLIST_DIR = ('BDMV', 'PLAYLIST')
@@ -85,6 +85,7 @@ class DiscHandler(QtCore.QObject):
         self.cleanup = True
 
         self.backup_path = None
+        self.mnt = None
         self.paths = {}
 
         self.dev = dev
@@ -212,8 +213,8 @@ class DiscHandler(QtCore.QObject):
         # We compute disc hash in thread to keep the GUI alive.
         # When finished will trigger the disc_lookup method,
         # passing in the disc hash
-        mnt = None if mnt == '' else mnt
-        self.disc_hasher = disc_hash.DiscHasher(mnt)
+        self.mnt = None if mnt == '' else mnt
+        self.disc_hasher = disc_hash.DiscHasher(self.mnt)
         self.disc_hasher.FINISHED.connect(self.disc_lookup)
         self.disc_hasher.start()
 
@@ -237,11 +238,12 @@ class DiscHandler(QtCore.QObject):
         # If hash is an emtpy string, then ensure that attribute is None
         self.hashid = hashid if hashid != '' else None
 
-        if self.discid is None and self.hashid is None:
+        if self.hashid is None:
             self.log.info(
-                "%s - No UUID found or hash for disc, ignoring",
+                "%s - No hash for disc, ignoring",
                 self.dev,
             )
+            DiscHashFailure(self.dev, self.mnt).exec_()
             return
 
         # Get title informaiton for tracks to rip

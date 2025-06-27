@@ -1,13 +1,16 @@
 import logging
 
 import os
+import re
 import json
+import zipfile
 import gzip
 
 
 def thediscdb_to_automakemkv(
     thediscdb_path: str,
     automakemkv_path: str | None = None,
+    update: bool = False,
 ) -> None:
     """
     Batch convert TheDiscDB to autoMakeMKV
@@ -31,7 +34,7 @@ def thediscdb_to_automakemkv(
     for res in find_match(thediscdb_path):
         if res is None:
             continue
-        metadata, release, titles, mkvdump = res
+        path, metadata, release, titles, mkvdump = res
         outbase = os.path.join(
             automakemkv_path,
             titles['ContentHash']
@@ -39,21 +42,20 @@ def thediscdb_to_automakemkv(
         metafile = f"{outbase}.json"
         dumpfile = f"{outbase}.info.gz"
 
-        log.info(mkvdump)
         log.info(metafile)
-        if os.path.isfile(metafile):
+        if os.path.isfile(metafile) and not update:
             log.warning(
                 'Metadata file alread exists "%s"; Skipping!',
                 metafile,
             )
             continue
 
+        print('Working on:', path)
         new_meta = convert_metadata(metadata, release, titles)
         with open(metafile, mode='w') as oid:
             json.dump(new_meta, oid, indent=4)
-        with open(mkvdump, mode='rb') as iid:
-            with gzip.open(dumpfile, mode='wb') as oid:
-                oid.write(iid.read())
+        with open(dumpfile, mode='wb') as oid:
+            oid.write(mkvdump)
 
 
 def convert_metadata(
@@ -140,7 +142,7 @@ def parse_title(disc_meta: dict, title: dict) -> dict:
         'imdb': disc_meta.get('imdb', ''),
         'isMovie': disc_meta['isMovie'],
         'isSeries': disc_meta['isSeries'],
-        'extra': '',
+        'extra': 'edition',
         'extraTitle': '',
         'Source Title Id': '',
         'Source FileName': '',
@@ -172,9 +174,35 @@ def parse_title(disc_meta: dict, title: dict) -> dict:
         converted['episodeTitle'] = item.get('Title', '')
         return converted
 
+    item_title = item.get('Title', '')
+    mm = re.search(r'\(([^\)]*)\)', item_title)  # Search for edition info
     # If here, then has to be a movie; update some more data
     if ttype in ('DeletedScene', 'Trailer', 'Extra'):
-        converted['extraTitle'] = item.get('Title', '')
+        converted['extraTitle'] = item_title
+    elif mm is not None:
+        # Title may have extra info in it (edition like Director's Cut).
+        # Use regex to search for pattern, but ask user about if is edition
+        # info or just part of the name
+        print(
+            f'The item "{item_title}" may have edition info in the title.'
+        )
+        print(
+            f'Is the information "{mm.group(1)}" info about an edition? '
+            " E.g., Director's Cut, Extended Edition, etc."
+        )
+        resp = input('INFO/REMOVE/ignore: ')
+
+        item_title = item_title.replace(mm.group(0), '').rstrip()
+        if resp == 'INFO':
+            print("Updating information to specify edition...")
+            converted['extraTitle'] = mm.group(1)
+            converted['title'] = item_title
+        elif resp == 'REMOVE':
+            print("Removing information from name...")
+            converted['title'] = item_title
+        else:
+            print(f"You entered '{resp}', assuming part of title.")
+        print()
 
     return converted
 
@@ -212,43 +240,64 @@ def find_match(base: str, content_hash: str | None = None) -> tuple | None:
 
     """
 
+    if os.path.isdir(base):
+        for root, dirs, items in os.walk(base):
+            for item in items:
+                yield item_checker(open, root, item, content_hash)
+    elif os.path.isfile(base) and base.endswith('.zip'):
+        with zipfile.ZipFile(base) as zipid:
+            for path in zipid.namelist():
+                root, item = os.path.split(path)
+                yield item_checker(zipid.open, root, item, content_hash)
+    else:
+        raise ValueError(f"Could not determine database type: {base}")
+
+
+def item_checker(
+    opener,
+    root: str,
+    item: str,
+    content_hash: str | None = None,
+):
+
     log = logging.getLogger(__name__)
+    if not item.startswith('disc') or not item.endswith('.json'):
+        return None
 
-    for root, dirs, items in os.walk(base):
-        for item in items:
-            if not item.startswith('disc') or not item.endswith('.json'):
-                continue
-            path = os.path.join(root, item)
-            try:
-                with open(path, mode='r') as iid:
-                    titles = json.load(iid)
-            except Exception as err:
-                log.error('Error parsing file "%s": %s', path, err)
+    path = os.path.join(root, item)
+    try:
+        with opener(path, mode='r') as iid:
+            titles = json.load(iid)
+    except Exception as err:
+        log.error('Error parsing file "%s": %s', path, err)
+        return None
 
-            ref_hash = titles.get('ContentHash', None)
-            if ref_hash is None:
-                log.warning(
-                    'No "ContentHash" key found in "%s"; skipping',
-                    path,
-                )
-                continue
+    ref_hash = titles.get('ContentHash', None)
+    if ref_hash is None:
+        log.warning(
+            'No "ContentHash" key found in "%s"; skipping',
+            path,
+        )
+        return None
 
-            if isinstance(content_hash, str) and ref_hash != content_hash:
-                continue
+    if isinstance(content_hash, str) and ref_hash != content_hash:
+        return None
 
-            # If here, then found a match
-            release = os.path.join(root, 'release.json')
-            metadata = os.path.join(
-                os.path.dirname(root),
-                'metadata.json',
-            )
-            mkvdump = os.path.splitext(path)[0] + '.txt'
+    # If here, then found a match
+    release = os.path.join(root, 'release.json')
+    metadata = os.path.join(
+        os.path.dirname(root),
+        'metadata.json',
+    )
+    mkvdump = os.path.splitext(path)[0] + '.txt'
 
-            with open(release, mode='r') as iid:
-                release = json.load(iid)
-            with open(metadata, mode='r') as iid:
-                metadata = json.load(iid)
+    with opener(release, mode='r') as iid:
+        release = json.load(iid)
+    with opener(metadata, mode='r') as iid:
+        metadata = json.load(iid)
+    with opener(mkvdump, mode='r') as iid:
+        mkvdump = gzip.compress(iid.read())
 
-            yield metadata, release, titles, mkvdump
-            if isinstance(content_hash, str):
-                return
+    return path, metadata, release, titles, mkvdump
+    if isinstance(content_hash, str):
+        return None

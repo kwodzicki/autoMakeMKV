@@ -149,7 +149,7 @@ class BaseMetadata(QtWidgets.QWidget):
             info.get('title', '')
         )
         self.year.setText(
-            info.get('year', '')
+            str(info.get('year', ''))
         )
         self.tmdb.setText(
             info.get('tmdb', '')

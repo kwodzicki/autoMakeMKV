@@ -12,6 +12,7 @@ import hashlib
 from PyQt5 import QtCore
 
 HOME = os.path.expanduser('~')
+ATTEMPTS = 30
 
 
 class DiscHasher(QtCore.QThread):
@@ -57,7 +58,7 @@ class DiscHasher(QtCore.QThread):
             if item.endswith(ext)
         ]
 
-        attempts = 3
+        attempts = ATTEMPTS
         while attempts > 0:
             sizes = None
             attempts -= 1
@@ -70,7 +71,7 @@ class DiscHasher(QtCore.QThread):
                     attempts,
                     err,
                 )
-                time.sleep(1.0)
+                time.sleep(2.0)
             else:
                 break
 

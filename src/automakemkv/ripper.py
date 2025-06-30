@@ -5,6 +5,7 @@ Utilities for ripping titles
 
 import logging
 import os
+import copy
 import shutil
 import subprocess
 
@@ -263,79 +264,10 @@ class DiscHandler(QtCore.QObject):
 
         # Update mounted information and run rip_disc
         self.info = info
-        self.options = metadata.ExistingDiscOptions(
-            self.dev,
-            info,
-            self.convention,
-        )
-        self.options.FINISHED.connect(self.handle_metadata)
-
-    @QtCore.pyqtSlot(bool)
-    def disc_metadata_dialog(self, load_existing: bool = False):
-
-        # Open dics metadata GUI and register "callback" for when closes
-        self.metadata = metadata.DiscMetadataEditor(
-            self.dev,
-            self.hashid,
-            self.dbdir,
-            load_existing=load_existing,
-        )
-        self.metadata.FINISHED.connect(self.handle_metadata)
-
-    @QtCore.pyqtSlot(str)
-    def backup_then_tag(self, backup_path: str):
-        """
-        Arguments:
-            backup_path (str): Path to the disc backup
-
-        """
-
-        success = self.ripper.result
-        self.progress.MKV_REMOVE_DISC.emit(self.dev)
-        if not success:
-            self.log.warning("Backup failed, not opening metadata window!")
-            self.FINISHED.emit()
-            return
-
-        self.backup_path = backup_path
-        self.metadata = metadata.DiscMetadataEditor(
-            self.dev,
-            self.hashid,
-            self.dbdir,
-            load_existing=True,
-            backed_up=True,
-        )
-        self.metadata.FINISHED.connect(self.handle_metadata)
+        self.existing_disc(metadata.RIP)
 
     @QtCore.pyqtSlot(int)
-    def handle_metadata(self, result: int) -> None:
-        """
-        Main handler for options and metadata events
-
-        When a disc is inserted, if it is in the database and options window
-        is presented asking how to handle the disc. If the disc is not in the
-        database, then a dialog for tagging the disc is presented. When either
-        of those windows is closed, the method is used as a callback for how
-        to handle the user's selection.
-
-        The value passed into this fuction is one of any number of integers
-        (set in the metadata.py module) signaling what to do.
-
-        Arguments:
-            result (int): Return code from options or metadata dialog for how
-                to process the disc
-
-        """
-
-        # Clean up options windows if it was used
-        if self.options is not None:
-            # Get convention from window; we update the attribute because
-            # if they changed it and then opened to edit metadata, the
-            # selection would be lost.
-            self.convention = self.options.convention
-            self.log.debug("%s - Cleaning up the options window", self.dev)
-            self.options.deleteLater()
-            self.options = None
+    def existing_disc(self, result: int):
 
         # If metadata attribute is not None, then must be new disc or
         # the user edited/updated something
@@ -399,15 +331,127 @@ class DiscHandler(QtCore.QObject):
             self.log.info("%s - Just saving metadata, not ripping", self.dev)
             return
 
+        self.options = metadata.ExistingDiscOptions(
+            self.dev,
+            self.info,
+            self.convention,
+            self.extras,
+            self.everything,
+        )
+        self.options.FINISHED.connect(self.handle_metadata)
+
+    @QtCore.pyqtSlot(bool)
+    def disc_metadata_dialog(self, load_existing: bool = False):
+
+        # Open dics metadata GUI and register "callback" for when closes
+        self.metadata = metadata.DiscMetadataEditor(
+            self.dev,
+            self.hashid,
+            self.dbdir,
+            load_existing=load_existing,
+        )
+        self.metadata.FINISHED.connect(self.existing_disc)
+
+    @QtCore.pyqtSlot(str)
+    def backup_then_tag(self, backup_path: str):
+        """
+        Arguments:
+            backup_path (str): Path to the disc backup
+
+        """
+
+        success = self.ripper.result
+        self.progress.MKV_REMOVE_DISC.emit(self.dev)
+        if not success:
+            self.log.warning("Backup failed, not opening metadata window!")
+            self.FINISHED.emit()
+            return
+
+        self.backup_path = backup_path
+        self.metadata = metadata.DiscMetadataEditor(
+            self.dev,
+            self.hashid,
+            self.dbdir,
+            load_existing=True,
+            backed_up=True,
+        )
+        self.metadata.FINISHED.connect(self.existing_disc)
+
+    @QtCore.pyqtSlot(int)
+    def handle_metadata(self, result: int) -> None:
+        """
+        Main handler for options and metadata events
+
+        When a disc is inserted, if it is in the database and options window
+        is presented asking how to handle the disc. If the disc is not in the
+        database, then a dialog for tagging the disc is presented. When either
+        of those windows is closed, the method is used as a callback for how
+        to handle the user's selection.
+
+        The value passed into this fuction is one of any number of integers
+        (set in the metadata.py module) signaling what to do.
+
+        Arguments:
+            result (int): Return code from options or metadata dialog for how
+                to process the disc
+
+        """
+
+        # Get convention from window; we update the attribute because
+        # if they changed it and then opened to edit metadata, the
+        # selection would be lost.
+        convention = self.options.convention
+        checked = self.options.checked
+        self.log.debug("%s - Cleaning up the options window", self.dev)
+        self.options.deleteLater()
+        self.options = None
+
+        # Check the "return" status of the dialog
+        if result == metadata.IGNORE:
+            self.log.info("%s - Ignoring disc", self.dev)
+            self.FINISHED.emit()
+            return
+
+        # If we are OPENING the disc info for editing
+        if result == metadata.OPEN:
+            self.DISC_METADATA_DIALOG.emit(True)
+            return
+
+        # Initialize ripper object
+        if result != metadata.RIP:
+            self.log.error("%s - Unrecognized option: %d", self.dev, result)
+            return
+
+        if self.info is None:
+            self.log.error("%s - No title information found/entered", self.dev)
+            return
+
+        if self.info == 'skiprip':
+            self.log.info("%s - Just saving metadata, not ripping", self.dev)
+            return
+
+        # I got a little lazy and did not want to rewrite the outfile code.
+        # So, if we have checked values, then we filter down the list of
+        # titles in a copy of the info dict to only those that have been
+        # checked by the user. We also set everything = True and extras = False
+        # to ensure that all titles, which have been manually filtered, are
+        # ripped.
+        info = copy.deepcopy(self.info)
+        info['titles'] = {
+            key: val
+            for i, (key, val) in enumerate(info['titles'].items())
+            if checked[i]
+        }
+
         # Get all paths to output files created during rip
         self.paths.update(
             dict(
                 path_utils.outfile(
                     self.outdir,
-                    self.info,
-                    everything=self.everything,
-                    extras=self.extras,
-                    convention=self.convention,
+                    info,
+                    everything=True,
+                    extras=False,
+                    convention=convention,
                 )
             )
         )
@@ -770,7 +814,6 @@ class RipDisc(makemkv.MakeMKVRip):
 
         """
 
-        output = info.get('title', 'image')
         super().__init__(
             'backup',
             dev=dev,

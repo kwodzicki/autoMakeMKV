@@ -102,7 +102,7 @@ class DiscMetadataEditor(dialogs.MyQDialog):
 
         self.loadDisc = makemkv.MakeMKVInfo(
             dev,
-            hashid,
+            self.hashid,
             dbdir=self.dbdir,
         )
         self.loadDisc.FAILURE.connect(self.load_failed)
@@ -357,7 +357,7 @@ class DiscMetadataEditor(dialogs.MyQDialog):
         titles = self.loadDisc.titles
         infoTitles = {}
         if info is not None:
-            self.hashid = info.get('hashID', None)
+            self.hashid = info.get('hashID', self.hashid)
             self.discMetadata.setInfo(info)
             infoTitles = info['titles']
 
@@ -428,6 +428,8 @@ class ExistingDiscOptions(dialogs.MyQDialog):
         dev: str,
         info: dict,
         convention: str,
+        extras: bool,
+        everything: bool,
         timeout: int = 30,
         parent=None,
     ):
@@ -438,7 +440,10 @@ class ExistingDiscOptions(dialogs.MyQDialog):
             timeout_fmt="Disc will begin ripping in: {:>4d} seconds"
         )
 
+        self.setMinimumSize(480, 480)
         self.dev = dev
+        self.extras = extras
+        self.everything = everything
 
         qbtn = (
             QtWidgets.QDialogButtonBox.Save
@@ -446,6 +451,10 @@ class ExistingDiscOptions(dialogs.MyQDialog):
             | QtWidgets.QDialogButtonBox.Ignore
         )
         self.button_box = QtWidgets.QDialogButtonBox(qbtn)
+        self.button_box.addButton(
+            'Wait',
+            QtWidgets.QDialogButtonBox.HelpRole,
+        )
         self.button_box.clicked.connect(self.action)
 
         message = (
@@ -468,15 +477,18 @@ class ExistingDiscOptions(dialogs.MyQDialog):
             self.convention_box.setCurrentIndex(idx)
 
         # Set up model for table containing releases
-        self.model = MyTableModel(info)
+        self.model = MyTableModel(info, self.extras, self.everything)
 
         # Build the table
         self.table = QtWidgets.QTableView()
         self.table.setModel(self.model)
         # Hide row names
         self.table.verticalHeader().setVisible(False)
+        # Resize checkbox column
+        self.table.resizeColumnToContents(0)
         # Disable selection
         self.table.setSelectionMode(QtWidgets.QTableView.NoSelection)
+        self.table.setFocusPolicy(QtCore.Qt.NoFocus)
 
         layout = QtWidgets.QVBoxLayout()
         layout.addWidget(
@@ -499,8 +511,24 @@ class ExistingDiscOptions(dialogs.MyQDialog):
     def convention(self) -> str:
         return self.convention_box.currentText()
 
+    @property
+    def checked(self) -> list[bool]:
+        return self.model.checked
+
     def action(self, button):
+        """
+        Button action handler
+
+        """
+
         self.stop_timer()
+
+        # If button has HelpRole, then erase timer label and return
+        role = self.button_box.buttonRole(button)
+        if role == QtWidgets.QDialogButtonBox.HelpRole:
+            self.timeout_label.setText('')
+            return
+
         if button == self.button_box.button(QtWidgets.QDialogButtonBox.Save):
             self.done(RIP)
             return
@@ -516,10 +544,19 @@ class MyTableModel(QtCore.QAbstractTableModel):
 
     """
 
-    def __init__(self, info: dict, parent=None):
+    def __init__(
+        self,
+        info: dict,
+        extras: bool,
+        everything: bool,
+        parent=None,
+    ):
         super().__init__(parent)
 
         self.log = logging.getLogger(__name__)
+
+        self.extras = extras
+        self.everything = everything
 
         self.info = info
         # Column names
@@ -539,49 +576,163 @@ class MyTableModel(QtCore.QAbstractTableModel):
             'Extra Title',
         ]
 
+        self.mixed_columns = [
+            'Movie/Series',
+            'Year',
+            'Season',
+            'Episode',
+            'Title',
+            'Extra Type',
+            'Extra Title',
+        ]
+
         self.columns = None
+        self._checked = []
         self._data = []
         self._build_data()
 
-    def _build_data(self):
-        # Iterate to create table rows and flattend information for releases.
-        # The flattened release informaiton is created by expanding each
-        # medium object in the list of mediums for a release into its own
-        # "release" object.
+    @property
+    def checked(self) -> list[bool]:
+        return self._checked
 
-        if self.info.get('isSeries', False):
+    def _is_checked(self, extra: str) -> bool:
+        """
+        Test if row should be checked by default
+
+        Arguments:
+            extra (str): Value of the extra type
+
+        Returns:
+            bool: If True, then checked, if False, unchecked
+
+        """
+
+        # Extra types to not consider as extras
+        non_extra = ('edition', '')
+        return (
+            self.everything
+            or (extra in non_extra and not self.extras)
+            or (extra not in non_extra and self.extras)
+        )
+
+    def _build_data(self):
+        """
+        Build data for table display
+
+        Iterate to create table rows and flattend information for releases.
+        The flattened release informaiton is created by expanding each
+        medium object in the list of mediums for a release into its own
+        "release" object.
+
+        """
+
+        titles = self.info.get('titles', {})
+
+        # Check each title to see if disc is mix of movies/series
+        series = False
+        movie = False
+        for title in titles.values():
+            if not series:
+                series = title.get('isSeries', False)
+            if not movie:
+                movie = title.get('isMovie', False)
+
+        # Set column names and row information builder based on movie/series
+        if series and movie:
+            func = self._mixed_info
+            self.columns = self.mixed_columns
+        elif series:
             func = self._series_info
             self.columns = self.series_columns
-        elif self.info.get('isMovie', False):
+        elif movie:
             func = self._movie_info
             self.columns = self.movie_columns
         else:
             self.log.error("Could not determine if movie or series!")
             return
 
+        # Loop over each title and build data for table
         data = []
-        for title in self.info.get('titles', {}).values():
-            data.append(func(title))
+        checked = []
+        for title in titles.values():
+            check, *info = func(title)
+            checked.append(check)
+            data.append(info)
 
+        self._checked.extend(checked)
         self._data.extend(data)
 
-    def _series_info(self, title):
+    def _series_info(self, title: dict) -> tuple:
+        """
+        Build table row for series disc
+
+        Arguments:
+            title (dict): Information about a single title on the disc
+
+        Returns:
+            tuple: Bool value for if title should be ripped based on the
+                extras/everything global settings and then all information
+                to be presented in the table
+        """
+
+        extra = title.get('extra', '')
 
         return (
-            self.info.get('title', ''),
-            self.info.get('year', ''),
+            self._is_checked(extra),
+            title.get('title', ''),
+            title.get('year', ''),
             title.get('season', ''),
             title.get('episode', ''),
             title.get('episodeTitle', ''),
-            title.get('extra', ''),
+            extra,
         )
 
-    def _movie_info(self, title):
+    def _movie_info(self, title: dict) -> tuple:
+        """
+        Build table row for movie disc
+
+        Arguments:
+            title (dict): Information about a single title on the disc
+
+        Returns:
+            tuple: Bool value for if title should be ripped based on the
+                extras/everything global settings and then all information
+                to be presented in the table
+        """
+
+        extra = title.get('extra', '')
 
         return (
-            self.info.get('title', ''),
-            self.info.get('year', ''),
-            title.get('extra', ''),
+            self._is_checked(extra),
+            title.get('title', ''),
+            title.get('year', ''),
+            extra,
+            title.get('extraTitle'),
+        )
+
+    def _mixed_info(self, title: dict) -> tuple:
+        """
+        Build table row for mixed movie/series disc
+
+        Arguments:
+            title (dict): Information about a single title on the disc
+
+        Returns:
+            tuple: Bool value for if title should be ripped based on the
+                extras/everything global settings and then all information
+                to be presented in the table
+        """
+
+        extra = title.get('extra', '')
+
+        return (
+            self._is_checked(extra),
+            title.get('title', ''),
+            title.get('year', ''),
+            title.get('season', ''),
+            title.get('episode', ''),
+            title.get('episodeTitle', ''),
+            extra,
             title.get('extraTitle'),
         )
 
@@ -592,23 +743,51 @@ class MyTableModel(QtCore.QAbstractTableModel):
         role: int,
     ):
         if role == QtCore.Qt.DisplayRole:
+            if section == 0:
+                return ""
             if orientation == QtCore.Qt.Horizontal:
-                return self.columns[section]
+                return self.columns[section - 1]
             return ""
 
     def columnCount(self, parent=None):
         if self.rowCount() == 0:
             return 0
-        return len(self._data[0])
+        return len(self._data[0]) + 1
 
     def rowCount(self, parent=None):
         return len(self._data)
 
     def data(self, index: QtCore.QModelIndex, role: int):
+        row, col = index.row(), index.column()
+
+        if col == 0:
+            if role == QtCore.Qt.CheckStateRole:
+                return (
+                    QtCore.Qt.Checked
+                    if self._checked[row] else
+                    QtCore.Qt.Unchecked
+                )
+            if role == QtCore.Qt.DisplayRole:
+                return ""
+            return QtCore.QVariant()
+
         if role == QtCore.Qt.DisplayRole:
-            row = index.row()
-            col = index.column()
-            return str(self._data[row][col])
+            return str(self._data[row][col - 1])
+
+        return QtCore.QVariant()
+
+    def setData(self, index, value, role=QtCore.Qt.EditRole):
+        row, col = index.row(), index.column()
+        if col == 0 and role == QtCore.Qt.CheckStateRole:
+            self._checked[row] = (value == QtCore.Qt.Checked)
+            self.dataChanged.emit(index, index, [QtCore.Qt.CheckStateRole])
+            return True
+        return False
+
+    def flags(self, index):
+        if index.column() == 0:
+            return QtCore.Qt.ItemIsEnabled | QtCore.Qt.ItemIsUserCheckable
+        return QtCore.Qt.ItemIsEnabled
 
 
 def check_info(parent, info: dict):

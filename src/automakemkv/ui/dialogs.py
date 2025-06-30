@@ -38,9 +38,181 @@ class MissingDirDialog(QtWidgets.QDialog):
         self.setLayout(self.layout)
 
 
-class RipFailure(QtWidgets.QDialog):
+class BackupExists(QtWidgets.QDialog):
+    def __init__(self, output: str, name: str = NAME):
+        super().__init__()
 
-    def __init__(self, device: str, name: str = NAME):
+        self._name = name
+        self.setWindowTitle(f"{self._name}: {output} Backup exists!")
+
+        self.buttonBox = QtWidgets.QDialogButtonBox()
+
+        # Create custom buttons
+        use_existing = QtWidgets.QPushButton("Use Existing")
+        use_existing.setToolTip(
+            "Extract titles from existing backup. "
+            "May fail if backup was incomplete"
+        )
+
+        new_backup = QtWidgets.QPushButton("Create New Backup")
+        new_backup.setToolTip("Remove old existing backup and create new one")
+
+        # Add buttons to the button box with specific roles
+        self.buttonBox.addButton(
+            use_existing,
+            QtWidgets.QDialogButtonBox.AcceptRole,
+        )
+        self.buttonBox.addButton(
+            new_backup,
+            QtWidgets.QDialogButtonBox.RejectRole,
+        )
+
+        # Connect signals
+        self.buttonBox.accepted.connect(self.accept)
+        self.buttonBox.rejected.connect(self.reject)
+
+        self.layout = QtWidgets.QVBoxLayout()
+        message = (
+            "It looks like there may already be a backup image at:",
+            os.linesep,
+            output,
+            os.linesep,
+            "Would you like to try to extract titles from it (Use Existing)",
+            "or would you like to create a fresh backup (Create New Backup)?",
+        )
+        message = QtWidgets.QLabel(
+            os.linesep.join(message)
+        )
+        self.layout.addWidget(message)
+        self.layout.addWidget(self.buttonBox)
+        self.setLayout(self.layout)
+
+
+class MyQDialog(QtWidgets.QDialog):
+    """
+    Overload done() and new signal
+
+    Create a new FINISHED signal that will pass bot the result code and
+    the dev device. This signal is emitted in the overloaded done() method.
+
+    """
+
+    # The dev device and the result code
+    FINISHED = QtCore.pyqtSignal(int)
+
+    def __init__(
+        self,
+        *args,
+        timeout: int | float | None = None,
+        timeout_code: int | None = None,
+        timeout_fmt: str | None = None,
+        **kwargs,
+    ):
+        """
+        Keyword arguments:
+            timeout (int, float): Amount of time to wait before window auto
+                closes. If timeout is set, then both timeout_code and
+                timeout_fmt must also be set.
+            timeout_code (int): Code to return IF window times out
+            timeout_fmt (str): Format string for updating when the window
+                will close
+
+        """
+
+        super().__init__(**kwargs)
+
+        self._timer = None
+        self._timeout = timeout
+        self._timeout_code = timeout_code
+        self._timeout_fmt = timeout_fmt
+
+        if (
+            self.timeout is not None
+            and (self.timeout_code is None or self.timeout_fmt is None)
+        ):
+            raise ValueError(
+                "If 'timeout' is set, then MUST set "
+                "'timeout_code' and 'timeout_fmt'!!!"
+            )
+
+        self.timeout_label = QtWidgets.QLabel()
+
+    @property
+    def timeout(self) -> int | float | None:
+        return self._timeout
+
+    @property
+    def timeout_code(self) -> int | None:
+        return self._timeout_code
+
+    @property
+    def timeout_fmt(self) -> str | None:
+        return self._timeout_fmt
+
+    def start_timer(self):
+        self._timer = QtCore.QTimer()
+        self._timer.timeout.connect(self._message_timeout)
+        self._timer.start(1000)
+
+    def stop_timer(self):
+        if self._timer is not None:
+            self._timer.stop()
+
+    def _message_timeout(self):
+        """
+        Run in time to auto close window
+
+        """
+
+        self._timeout -= 1
+        if self._timeout > 0:
+            self.timeout_label.setText(
+                self.timeout_fmt.format(self._timeout)
+            )
+            return
+        self.stop_timer()
+        self.done(self.timeout_code)
+
+    def done(self, arg):
+
+        super().done(arg)
+        self.FINISHED.emit(self.result())
+
+
+class DiscHashFailure(MyQDialog):
+    """
+    Dialog for when rip fails
+
+    """
+
+    def __init__(self, device: str, mnt: str, name: str = NAME):
+        super().__init__()
+
+        self._name = name
+        self.setWindowTitle(f"{self._name}: Failed to get Disc Hash!")
+
+        QBtn = QtWidgets.QDialogButtonBox.Ok
+
+        self.buttonBox = QtWidgets.QDialogButtonBox(QBtn)
+        self.buttonBox.accepted.connect(self.accept)
+
+        self.layout = QtWidgets.QVBoxLayout()
+        message = QtWidgets.QLabel(
+            f"Failed to compute disc hash for {device}\n\n"
+            f"Mount point: \n{mnt}"
+        )
+        self.layout.addWidget(message)
+        self.layout.addWidget(self.buttonBox)
+        self.setLayout(self.layout)
+
+
+class RipFailure(MyQDialog):
+    """
+    Dialog for when fail to get disc hash
+
+    """
+
+    def __init__(self, device: str, fname: str, name: str = NAME):
         super().__init__()
 
         self._name = name
@@ -53,17 +225,26 @@ class RipFailure(QtWidgets.QDialog):
 
         self.layout = QtWidgets.QVBoxLayout()
         message = QtWidgets.QLabel(
-            f"Rip failed for {device}",
+            f"Rip failed for {device}\n\n"
+            f"Failed to create file:\n{fname}"
         )
         self.layout.addWidget(message)
         self.layout.addWidget(self.buttonBox)
         self.setLayout(self.layout)
 
 
-class RipSuccess(QtWidgets.QDialog):
+class RipSuccess(MyQDialog):
+    """
+    Timed Dialog for when rip success
 
-    def __init__(self, device: str, name: str = NAME):
-        super().__init__()
+    """
+
+    def __init__(self, device: str, fname: str, name: str = NAME):
+        super().__init__(
+            timeout=30,
+            timeout_code=0,
+            timeout_fmt="Window will automatically close in {:>4d} seconds",
+        )
 
         self._name = name
         self.setWindowTitle(f"{self._name}: Rip Success!")
@@ -75,11 +256,14 @@ class RipSuccess(QtWidgets.QDialog):
 
         self.layout = QtWidgets.QVBoxLayout()
         message = QtWidgets.QLabel(
-            f"Rip completed for {device}",
+            f"Rip success for {device}\n\n"
+            f"Created file:\n{fname}"
         )
         self.layout.addWidget(message)
+        self.layout.addWidget(self.timeout_label)
         self.layout.addWidget(self.buttonBox)
         self.setLayout(self.layout)
+        self.start_timer()
 
 
 class SettingsDialog(QtWidgets.QDialog):
@@ -178,21 +362,3 @@ class SettingsWidget(QtWidgets.QWidget):
             utils.save_settings(settings)
 
         return settings
-
-
-class MyQDialog(QtWidgets.QDialog):
-    """
-    Overload done() and new signal
-
-    Create a new FINISHED signal that will pass bot the result code and
-    the dev device. This signal is emitted in the overloaded done() method.
-
-    """
-
-    # The dev device and the result code
-    FINISHED = QtCore.pyqtSignal(int)
-
-    def done(self, arg):
-
-        super().done(arg)
-        self.FINISHED.emit(self.result())

@@ -8,6 +8,7 @@ from PyQt5 import QtCore
 from PyQt5 import QtGui
 
 from .. import LOG, STREAM, ROTFILE, NAME, APP_ICON, TRAY_ICON
+from . import metadata
 from . import progress
 from . import dialogs
 from . import utils
@@ -37,6 +38,8 @@ class SystemTray(QtWidgets.QSystemTrayIcon):
         self._app = app
         self._menu = QtWidgets.QMenu()
 
+        self.metadata = None
+
         self._label = QtWidgets.QAction(self._name)
         self._label.setEnabled(False)
         self._menu.addAction(self._label)
@@ -46,6 +49,10 @@ class SystemTray(QtWidgets.QSystemTrayIcon):
         self._settings = QtWidgets.QAction('Settings')
         self._settings.triggered.connect(self.settings_widget)
         self._menu.addAction(self._settings)
+
+        self._metadata = QtWidgets.QAction('Metadata Editor')
+        self._metadata.triggered.connect(self.metadata_widget)
+        self._menu.addAction(self._metadata)
 
         self._menu.addSeparator()
 
@@ -80,6 +87,32 @@ class SystemTray(QtWidgets.QSystemTrayIcon):
             self.watchdog.set_settings(
                 **settings_widget.get_settings(),
             )
+
+    def metadata_widget(self, *args, **kwargs):
+        """
+        Open metadata or bring to focus
+
+        If the metadata attribute is not None, then try to pull focus of
+        dialog. Otherwise, we open a new dialog
+
+        """
+
+        if self.metadata is not None:
+            self.metadata.setFocus()
+            return
+
+        self.metadata = metadata.DiscMetadataEditor(
+            '',
+            '',
+            self.watchdog.dbdir,
+        )
+        self.metadata.finished.connect(self.metadata_close)
+
+    def metadata_close(self, *args, **kwargs):
+        """Run when metadata dialog close for cleanup"""
+
+        self.metadata.deleteLater()
+        self.metadata = None
 
     def quit(self, *args, **kwargs):
         """Display quit confirm dialog"""

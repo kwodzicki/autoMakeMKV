@@ -55,6 +55,8 @@ class BaseWatchdog(QtCore.QThread):
 
         self._outdir = None
         self._mounted = []
+        self._failure = []
+        self._success = []
 
         self.progress = progress
 
@@ -100,22 +102,48 @@ class BaseWatchdog(QtCore.QThread):
     def quit(self, *args, **kwargs):
         RUNNING.set()
 
-    @QtCore.pyqtSlot()
-    def rip_failure(self):
+    @QtCore.pyqtSlot(str)
+    def rip_failure(self, fname: str):
 
         dev = self.sender().dev
-        dialog = dialogs.RipFailure(dev)
+        dialog = dialogs.RipFailure(dev, fname)
+        self._failure.append(dialog)
+        dialog.FINISHED.connect(self._failure_closed)
         dialog.exec_()
 
-    @QtCore.pyqtSlot()
-    def rip_success(self):
+    @QtCore.pyqtSlot(int)
+    def _failure_closed(self, res: int):
+        obj = self.sender()
+        if obj in self._failure:
+            self._failure.remove(obj)
+        obj.deleteLater()
+
+    @QtCore.pyqtSlot(str)
+    def rip_success(self, fname: str):
+        """
+        Display dialog to signal failed rip
+
+        """
 
         dev = self.sender().dev
-        dialog = dialogs.RipSuccess(dev)
+        dialog = dialogs.RipSuccess(dev, fname)
+        self._success.append(dialog)
+        dialog.FINISHED.connect(self._success_closed)
         dialog.exec_()
+
+    @QtCore.pyqtSlot(int)
+    def _success_closed(self, res: int):
+        obj = self.sender()
+        if obj in self._success:
+            self._success.remove(obj)
+        obj.deleteLater()
 
     @QtCore.pyqtSlot()
     def rip_finished(self):
+        """
+        Display timed dialog to signal successful rip
+
+        """
 
         sender = self.sender()
         self.log.debug("%s - Processing finished event", sender.dev)

@@ -5,8 +5,8 @@ Utilities for ripping titles
 
 import logging
 import os
+import copy
 import shutil
-import time
 import subprocess
 
 from PyQt5 import QtCore
@@ -17,12 +17,14 @@ from . import disc_hash
 from . import makemkv
 from . import path_utils
 from .ui import metadata
+from .ui.dialogs import BackupExists, DiscHashFailure
 
 SIZE_POLL = 10
 PLAYLIST_DIR = ('BDMV', 'PLAYLIST')
 PLAYLIST_EXT = '.mpls'
 STREAM_DIR = ('BDMV', 'STREAM')
 STREAM_EXT = '.m2ts'
+BACKUP_FILE = 'image.iso'
 MAKEMKV_SETTINGS = utils.load_makemkv_settings()
 
 
@@ -32,8 +34,10 @@ class DiscHandler(QtCore.QObject):
 
     """
 
-    FAILURE = QtCore.pyqtSignal()
-    SUCCESS = QtCore.pyqtSignal()
+    # String object is path of the output file to be created
+    FAILURE = QtCore.pyqtSignal(str)
+    SUCCESS = QtCore.pyqtSignal(str)
+
     FINISHED = QtCore.pyqtSignal()
     EJECT_DISC = QtCore.pyqtSignal()
 
@@ -77,7 +81,12 @@ class DiscHandler(QtCore.QObject):
         self.EXTRACT_TITLE.connect(self.extract_title)
 
         self._cancelled = False
+        self._delay_eject = False  # used during backup then tag
+
+        self.cleanup = True
+
         self.backup_path = None
+        self.mnt = None
         self.paths = {}
 
         self.dev = dev
@@ -90,6 +99,7 @@ class DiscHandler(QtCore.QObject):
         self.progress = progress
         self.progress.CANCEL.connect(self.cancel)
 
+        self.disc_hasher = None
         self.options = None
         self.metadata = None
         self.ripper = None
@@ -105,22 +115,26 @@ class DiscHandler(QtCore.QObject):
             tmpdir = os.path.basename(dev)
         else:
             tmpdir = drive.rstrip(":") + "_drive"
-        tmpdir = f"{tmpdir}_{time.monotonic_ns()}"
-        self.tmpdir = os.path.join(outdir, tmpdir)
+        self._tmpdir = os.path.join(outdir, tmpdir)
 
+        self.hashid = None
         self.discid = utils.get_discid(dev, root)  # This is pretty quick
 
-        # We compute disc hash in thread to keep the GUI alive.
-        # When finished will trigger the disc_lookup method,
-        # passing in the disc hash
-        mnt = utils.dev_to_mount(dev)
-        self.hashid = disc_hash.DiscHasher(mnt)
-        self.hashid.FINISHED.connect(self.disc_lookup)
-        self.hashid.start()
+        # Finding mount point can take a little bit, so we do in thread.
+        # On windows, this thread should finish right away
+        self.dev_to_mnt = utils.DevToMount(dev)
+        self.dev_to_mnt.FINISHED.connect(self.found_mount_point)
+        self.dev_to_mnt.start()
 
     @property
     def hash(self) -> str | None:
         return self.hashid or self.discid
+
+    @property
+    def tmpdir(self) -> str:
+        if self.hash is None:
+            return self._tmpdir
+        return f"{self._tmpdir}_{self.hash}"
 
     def isRunning(self):
         """
@@ -131,6 +145,20 @@ class DiscHandler(QtCore.QObject):
         if self.ripper is not None:
             return self.ripper.isRunning()
         return False
+
+    def use_existing_backup(self, output: str) -> bool:
+        """
+        Returns:
+            bool: If true, then use the existing backup, else create new
+
+        """
+
+        # If output doesn't exist, then return False; i.e., new backup
+        if not os.path.exists(output):
+            return False
+
+        dlg = BackupExists(output)
+        return dlg.exec_()  # Return True if using existing, False otherwise
 
     @QtCore.pyqtSlot(str)
     def cancel(self, dev: str):
@@ -159,6 +187,39 @@ class DiscHandler(QtCore.QObject):
             self.extractor.CANCEL.emit()
 
     @QtCore.pyqtSlot(str)
+    def found_mount_point(self, mnt: str) -> None:
+        """
+        Callback for mount point found
+
+        On windows, the 'dev' device is the mount point, so it takes no time
+        to look that up. However, on Linux, everything is done by /dev/
+        device and udev events for a disc insert can come before the disc is
+        fully mounted to a path. So, there are tries/retries that occur when
+        trying to deteremine the mount point from the /dev/ device. This is
+        done in a QThread so as to not block GUI operations.
+
+        When the search is finished, the objects FINISHED signal is emitted,
+        calling this method to set up a DiscHash lookup.
+
+        Arguments:
+            mnt (str): The mount point of the disc. If no mount point
+                determined, this will be an empty string
+
+        """
+
+        # Clean up the thread object for mount point lookup
+        self.dev_to_mnt.deleteLater()
+        self.dev_to_mnt = None
+
+        # We compute disc hash in thread to keep the GUI alive.
+        # When finished will trigger the disc_lookup method,
+        # passing in the disc hash
+        self.mnt = None if mnt == '' else mnt
+        self.disc_hasher = disc_hash.DiscHasher(self.mnt)
+        self.disc_hasher.FINISHED.connect(self.disc_lookup)
+        self.disc_hasher.start()
+
+    @QtCore.pyqtSlot(str)
     def disc_lookup(self, hashid: str):
         """
         Get information about a disc
@@ -171,17 +232,19 @@ class DiscHandler(QtCore.QObject):
 
         """
 
-        self.hashid.wait()  # Should be quick as FINISHED is at end of thread
-        self.hashid.deleteLater()
+        if self.disc_hasher is not None:
+            self.disc_hasher.wait()  # Should be quick
+            self.disc_hasher.deleteLater()
 
         # If hash is an emtpy string, then ensure that attribute is None
         self.hashid = hashid if hashid != '' else None
 
-        if self.discid is None and self.hashid is None:
+        if self.hashid is None:
             self.log.info(
-                "%s - No UUID found or hash for disc, ignoring",
+                "%s - No hash for disc, ignoring",
                 self.dev,
             )
+            DiscHashFailure(self.dev, self.mnt).exec_()
             return
 
         # Get title informaiton for tracks to rip
@@ -201,53 +264,18 @@ class DiscHandler(QtCore.QObject):
 
         # Update mounted information and run rip_disc
         self.info = info
-        self.options = metadata.ExistingDiscOptions(
-            self.dev,
-            info,
-            self.convention,
-        )
-        self.options.FINISHED.connect(self.handle_metadata)
-
-    @QtCore.pyqtSlot(bool)
-    def disc_metadata_dialog(self, load_existing: bool = False):
-
-        # Open dics metadata GUI and register "callback" for when closes
-        self.metadata = metadata.DiscMetadataEditor(
-            self.dev,
-            self.hashid,
-            self.dbdir,
-            load_existing=load_existing,
-        )
-        self.metadata.FINISHED.connect(self.handle_metadata)
+        self.existing_disc(metadata.RIP)
 
     @QtCore.pyqtSlot(int)
-    def handle_metadata(self, result: int) -> None:
-        """
-        Rip a whole disc
+    def existing_disc(self, result: int):
 
-        Given information about a disc, rip
-        all tracks. Intended to be run as thread
-        so watchdog can keep looking for new discs
-
-        Arguments:
-            dev (str) : Device to rip from
-            root (str) : Location of the 'by-uuid' directory
-                where discs are mounted. This is used to
-                get the unique ID of the disc.
-            outdir (str) : Directory to save mkv files to
-            extras (bool) : Flag for if should rip extras
-
-        """
-
-        # Clean up any windows that are hanging around
-        if self.options is not None:
-            # Get convention from window; we update the attribute because
-            # if they changed it and then opened to edit metadata, the
-            # selection would be lost.
-            self.convention = self.options.convention
-            self.log.debug("%s - Cleaning up the options window", self.dev)
-            self.options.deleteLater()
-            self.options = None
+        # If metadata attribute is not None, then must be new disc or
+        # the user edited/updated something
+        if self.metadata is not None:
+            self.log.debug("%s - Cleaning up the metadata window", self.dev)
+            self.info = self.metadata.info
+            self.metadata.deleteLater()
+            self.metadata = None
 
         # Check the "return" status of the dialog
         if result == metadata.IGNORE:
@@ -267,13 +295,28 @@ class DiscHandler(QtCore.QObject):
             self.FINISHED.emit()
             return
 
-        # If metadata attribute is not None, then must be new disc or
-        # the user edited/updated something
-        if self.metadata is not None:
-            self.log.debug("%s - Cleaning up the metadata window", self.dev)
-            self.info = self.metadata.info
-            self.metadata.deleteLater()
-            self.metadata = None
+        # If we want to backup, then reopen metadata for tagging
+        if result == metadata.BACKUP_THEN_TAG:
+            output = os.path.join(self.tmpdir, BACKUP_FILE)
+            if self.use_existing_backup(output):
+                # If using existing, then call method and then return
+                self.rip_finished(output)
+                return
+
+            self._delay_eject = True
+            self.ripper = RipDisc(
+                self.dev,
+                self.info,
+                output,
+                self.progress,
+                eject=False,  # Do NOT eject when doing backup then tag
+            )
+            self.ripper.FAILURE.connect(self.FAILURE.emit)
+            self.ripper.SUCCESS.connect(self.SUCCESS.emit)
+            self.ripper.EJECT_DISC.connect(self.EJECT_DISC.emit)
+            self.ripper.FINISHED.connect(self.backup_then_tag)
+            self.ripper.start()
+            return
 
         # Initialize ripper object
         if result != metadata.RIP:
@@ -288,15 +331,127 @@ class DiscHandler(QtCore.QObject):
             self.log.info("%s - Just saving metadata, not ripping", self.dev)
             return
 
+        self.options = metadata.ExistingDiscOptions(
+            self.dev,
+            self.info,
+            self.convention,
+            self.extras,
+            self.everything,
+        )
+        self.options.FINISHED.connect(self.handle_metadata)
+
+    @QtCore.pyqtSlot(bool)
+    def disc_metadata_dialog(self, load_existing: bool = False):
+
+        # Open dics metadata GUI and register "callback" for when closes
+        self.metadata = metadata.DiscMetadataEditor(
+            self.dev,
+            self.hashid,
+            self.dbdir,
+            load_existing=load_existing,
+        )
+        self.metadata.FINISHED.connect(self.existing_disc)
+
+    @QtCore.pyqtSlot(str)
+    def backup_then_tag(self, backup_path: str):
+        """
+        Arguments:
+            backup_path (str): Path to the disc backup
+
+        """
+
+        success = self.ripper.result
+        self.progress.MKV_REMOVE_DISC.emit(self.dev)
+        if not success:
+            self.log.warning("Backup failed, not opening metadata window!")
+            self.FINISHED.emit()
+            return
+
+        self.backup_path = backup_path
+        self.metadata = metadata.DiscMetadataEditor(
+            self.dev,
+            self.hashid,
+            self.dbdir,
+            load_existing=True,
+            backed_up=True,
+        )
+        self.metadata.FINISHED.connect(self.existing_disc)
+
+    @QtCore.pyqtSlot(int)
+    def handle_metadata(self, result: int) -> None:
+        """
+        Main handler for options and metadata events
+
+        When a disc is inserted, if it is in the database and options window
+        is presented asking how to handle the disc. If the disc is not in the
+        database, then a dialog for tagging the disc is presented. When either
+        of those windows is closed, the method is used as a callback for how
+        to handle the user's selection.
+
+        The value passed into this fuction is one of any number of integers
+        (set in the metadata.py module) signaling what to do.
+
+        Arguments:
+            result (int): Return code from options or metadata dialog for how
+                to process the disc
+
+        """
+
+        # Get convention from window; we update the attribute because
+        # if they changed it and then opened to edit metadata, the
+        # selection would be lost.
+        convention = self.options.convention
+        checked = self.options.checked
+        self.log.debug("%s - Cleaning up the options window", self.dev)
+        self.options.deleteLater()
+        self.options = None
+
+        # Check the "return" status of the dialog
+        if result == metadata.IGNORE:
+            self.log.info("%s - Ignoring disc", self.dev)
+            self.FINISHED.emit()
+            return
+
+        # If we are OPENING the disc info for editing
+        if result == metadata.OPEN:
+            self.DISC_METADATA_DIALOG.emit(True)
+            return
+
+        # Initialize ripper object
+        if result != metadata.RIP:
+            self.log.error("%s - Unrecognized option: %d", self.dev, result)
+            return
+
+        if self.info is None:
+            self.log.error("%s - No title information found/entered", self.dev)
+            return
+
+        if self.info == 'skiprip':
+            self.log.info("%s - Just saving metadata, not ripping", self.dev)
+            return
+
+        # I got a little lazy and did not want to rewrite the outfile code.
+        # So, if we have checked values, then we filter down the list of
+        # titles in a copy of the info dict to only those that have been
+        # checked by the user. We also set everything = True and extras = False
+        # to ensure that all titles, which have been manually filtered, are
+        # ripped.
+        info = copy.deepcopy(self.info)
+        info['titles'] = {
+            key: val
+            for i, (key, val) in enumerate(info['titles'].items())
+            if checked[i]
+        }
+
         # Get all paths to output files created during rip
         self.paths.update(
             dict(
                 path_utils.outfile(
                     self.outdir,
-                    self.info,
-                    everything=self.everything,
-                    extras=self.extras,
-                    convention=self.convention,
+                    info,
+                    everything=True,
+                    extras=False,
+                    convention=convention,
                 )
             )
         )
@@ -306,6 +461,12 @@ class DiscHandler(QtCore.QObject):
         for title in title_nums:
             if title not in self.paths:
                 _ = self.info['titles'].pop(title)
+
+        # If backup_path is set, then we did a backup then tag event, so disc
+        # is already backed up and we need to extract titles.
+        if self.backup_path is not None:
+            self.rip_finished(self.backup_path)
+            return
 
         self.log.debug(
             "%s - Creating temporary directory : '%s'",
@@ -328,10 +489,16 @@ class DiscHandler(QtCore.QObject):
                 self.progress,
             )
         else:
+            output = os.path.join(self.tmpdir, BACKUP_FILE)
+            if self.use_existing_backup(output):
+                # If using existing, then call method and then return
+                self.rip_finished(output)
+                return
+
             self.ripper = RipDisc(
                 self.dev,
                 self.info,
-                self.tmpdir,
+                output,
                 self.progress,
             )
 
@@ -360,8 +527,11 @@ class DiscHandler(QtCore.QObject):
 
         """
 
-        self.ripper.wait()  # This "shouldn't" take too long
-        success = self.ripper.result
+        success = True
+        if self.ripper is not None:
+            self.ripper.wait()  # This "shouldn't" take too long
+            success = self.ripper.result
+
         self.progress.MKV_REMOVE_DISC.emit(self.dev)
         if success:
             # If RipTitle instance, then we are done
@@ -373,8 +543,10 @@ class DiscHandler(QtCore.QObject):
                 self.EXTRACT_TITLE.emit('')
 
         self.log.debug("%s - Cleaning up the ripper thread", self.dev)
-        self.ripper.deleteLater()
-        self.ripper = None
+
+        if self.ripper is not None:
+            self.ripper.deleteLater()
+            self.ripper = None
 
         # IF failed, then emit FINISHED for cleanup
         if not success:
@@ -383,6 +555,11 @@ class DiscHandler(QtCore.QObject):
             except Exception:
                 pass
             self.FINISHED.emit()
+
+        # If eject was delayed, run eject now
+        if self._delay_eject:
+            self.log.debug('%s - Running delayed eject', self.dev)
+            self.EJECT_DISC.emit()
 
     @QtCore.pyqtSlot(str)
     def extract_title(self, previous_output: str) -> None:
@@ -427,6 +604,9 @@ class DiscHandler(QtCore.QObject):
                     self.info,
                     self.progress
                 )
+
+            self.extractor.FAILURE.connect(self.FAILURE.emit)
+            self.extractor.SUCCESS.connect(self.SUCCESS.emit)
             self.extractor.FINISHED.connect(self.extract_title)
             self.extractor.start()
 
@@ -436,31 +616,32 @@ class DiscHandler(QtCore.QObject):
         self.extractor = None
         self.progress.MKV_REMOVE_DISC.emit(self.backup_path)
 
-        self.log.debug(
-            "%s - Removing temporary directory: %s",
-            self.dev,
-            self.tmpdir,
-        )
+        if self.cleanup:
+            # Attempt to remove the backup (tmp) file
+            self.log.debug(
+                "%s - Removing temporary directory: %s",
+                self.dev,
+                self.tmpdir,
+            )
 
-        # Attempt to remove the backup (tmp) file
-        if os.path.isdir(self.tmpdir):
-            try:
-                shutil.rmtree(self.tmpdir)
-            except Exception as err:
-                self.log.warning(
-                    "Failed to remove directory '%s': %s",
-                    self.tmpdir,
-                    err,
-                )
-        elif os.path.isfile(self.tmpdir):
-            try:
-                os.remove(self.tmpdir)
-            except Exception as err:
-                self.log.warning(
-                    "Failed to remove file '%s': %s",
-                    self.tmpdir,
-                    err,
-                )
+            if os.path.isdir(self.tmpdir):
+                try:
+                    shutil.rmtree(self.tmpdir)
+                except Exception as err:
+                    self.log.warning(
+                        "Failed to remove directory '%s': %s",
+                        self.tmpdir,
+                        err,
+                    )
+            elif os.path.isfile(self.tmpdir):
+                try:
+                    os.remove(self.tmpdir)
+                except Exception as err:
+                    self.log.warning(
+                        "Failed to remove file '%s': %s",
+                        self.tmpdir,
+                        err,
+                    )
 
         # Emit FINISHED to ensure cleanup of the object
         self.FINISHED.emit()
@@ -492,6 +673,7 @@ class RipTitle(makemkv.MakeMKVRip):
             output (str) : Name of the output file
             info (dict): Info about tracks on the disc; needed
                 for progress window
+            fname (str): Output file name for the title
 
         Returns:
             bool : True if ripped, False otherwise
@@ -550,6 +732,7 @@ class RipTitle(makemkv.MakeMKVRip):
 
         # If bad return code or failure
         if self.returncode != 0 or self.failure:
+            self.FAILURE.emit(self.fname)
             fdirs = []
             for fname in files:
                 fdir = os.path.dirname(fname)
@@ -571,6 +754,7 @@ class RipTitle(makemkv.MakeMKVRip):
             return False
 
         if len(files) == 0:
+            self.FAILURE.emit(self.fname)
             self.log.error(
                 "%s - Something went wrong, no output file found!",
                 self.dev,
@@ -578,11 +762,13 @@ class RipTitle(makemkv.MakeMKVRip):
             return False
 
         if len(files) > 1:
+            self.FAILURE.emit(self.fname)
             self.log.error("%s - Too many output files: %s", self.dev, files)
             for fname in files:
                 os.remove(fname)
             return False
 
+        self.SUCCESS.emit(self.fname)
         self.log.info(
             "%s - Renaming file '%s' ---> '%s'",
             self.dev,
@@ -610,8 +796,9 @@ class RipDisc(makemkv.MakeMKVRip):
         self,
         dev: str,
         info: dict,
-        tmpdir: str,
+        output: str,
         progress,
+        eject: bool = True,
     ):
         """
         Rip a given title from a disc
@@ -631,9 +818,10 @@ class RipDisc(makemkv.MakeMKVRip):
             'backup',
             dev=dev,
             decrypt=True,
-            output=os.path.join(tmpdir, 'image.iso'),
+            output=output,
         )
 
+        self._eject = eject
         self.progress = progress
         self.progress.MKV_ADD_DISC.emit(self.dev, info, True)
 
@@ -667,6 +855,15 @@ class RipDisc(makemkv.MakeMKVRip):
 
         self.log.debug('%s - Running rip disc', self.dev)
 
+        # If output already exists, then delete it
+        if os.path.exists(self.output):
+            try:
+                os.remove(self.output)
+            except IsADirectoryError:
+                shutil.rmtree(self.output)
+            except FileNotFoundError:
+                pass
+
         # Start process for backup
         self.makemkvcon()
 
@@ -680,11 +877,13 @@ class RipDisc(makemkv.MakeMKVRip):
         # Wait for process to finish
         self.monitor_proc()
 
-        # Eject the disc
-        self.EJECT_DISC.emit()
+        # Eject the disc if _eject set
+        if self._eject:
+            self.EJECT_DISC.emit()
 
         # If bad return code or failure
         if self.returncode != 0 or self.failure:
+            self.FAILURE.emit(self.output)
             self.log.warning("%s - Error backing up disc", self.dev)
 
             try:
@@ -696,6 +895,7 @@ class RipDisc(makemkv.MakeMKVRip):
             self.log.debug("%s - Removed dir: %s", self.dev, self.output)
             return False
 
+        self.SUCCESS.emit(self.output)
         return True
 
 
@@ -784,6 +984,7 @@ class ExtractFromDVD(makemkv.MakeMKVRip):
 
         # If there was an error during extration
         if self.returncode != 0 or self.failure:
+            self.FAILURE.emit(output)
             self.log.warning(
                 "%s - Failed to extract title %s from backup",
                 self.src,
@@ -797,6 +998,7 @@ class ExtractFromDVD(makemkv.MakeMKVRip):
 
         # If number of files found is different that one (1)
         if len(files) != 1:
+            self.FAILURE.emit(output)
             self.log.error("%s - Too many output files!", self.src)
             for fname in files:
                 os.remove(fname)
@@ -818,6 +1020,8 @@ class ExtractFromDVD(makemkv.MakeMKVRip):
         # Rename the file
         os.rename(files[0], output)
 
+        self.SUCCESS.emit(output)
+
         return True
 
 
@@ -827,6 +1031,8 @@ class ExtractFromBluRay(QtCore.QThread):
 
     """
 
+    FAILURE = QtCore.pyqtSignal(str)
+    SUCCESS = QtCore.pyqtSignal(str)
     FINISHED = QtCore.pyqtSignal(str)
 
     def __init__(self, src: str, paths: dict, info: dict, progress):
@@ -912,6 +1118,7 @@ class ExtractFromBluRay(QtCore.QThread):
             .get('Source FileName', None)
         )
         if title_src is None:
+            self.FAILURE.emit(output)
             self.log.error(
                 "%s - Failed to find playlist name for title '%s', "
                 "skipping.",
@@ -926,6 +1133,7 @@ class ExtractFromBluRay(QtCore.QThread):
         elif title_src.endswith(STREAM_EXT):
             title_src = os.path.join(self.src, *STREAM_DIR, title_src)
         else:
+            self.FAILURE.emit(output)
             self.log.warning(
                 "%s - File not currently supported: %s",
                 self.src,
@@ -951,4 +1159,9 @@ class ExtractFromBluRay(QtCore.QThread):
         self.progress.MKV_NEW_PROCESS.emit(self.src, self.proc, 'stdout')
         self.proc.wait()
 
+        if self.proc.returncode != 0:
+            self.FAILURE.emit(output)
+            return False
+
+        self.SUCCESS.emit(output)
         return True

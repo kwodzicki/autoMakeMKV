@@ -62,6 +62,7 @@ class BaseWatchdog(QtCore.QThread):
 
         self.dbdir = kwargs.get('dbdir', DBDIR)
         self.outdir = outdir
+        self.tmpdir = outdir
         self.everything = everything
         self.extras = extras
         self.convention = convention
@@ -85,6 +86,7 @@ class BaseWatchdog(QtCore.QThread):
         self.log.debug('Updating ripping options')
         self.dbdir = kwargs.get('dbdir', self.dbdir)
         self.outdir = kwargs.get('outdir', self.outdir)
+        self.tmpdir = kwargs.get('tmpdir', self.tmpdir)
         self.everything = kwargs.get('everything', self.everything)
         self.extras = kwargs.get('extras', self.extras)
         self.convention = kwargs.get('convention', self.convention)
@@ -94,6 +96,7 @@ class BaseWatchdog(QtCore.QThread):
         return {
             'dbdir': self.dbdir,
             'outdir': self.outdir,
+            'tmpdir': self.tmpdir,
             'everything': self.everything,
             'extras': self.extras,
             'convention': self.convention,
@@ -164,6 +167,7 @@ class BaseWatchdog(QtCore.QThread):
         obj = ripper.DiscHandler(
             dev,
             self.outdir,
+            self.tmpdir,
             self.everything,
             self.extras,
             self.convention,

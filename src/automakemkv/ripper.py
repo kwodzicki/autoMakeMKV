@@ -48,6 +48,7 @@ class DiscHandler(QtCore.QObject):
         self,
         dev: str,
         outdir: str,
+        tmpdir: str,
         everything: bool,
         extras: bool,
         convention: str,
@@ -60,6 +61,8 @@ class DiscHandler(QtCore.QObject):
         Arguments:
             dev (str): Dev device
             outdir (str) : Top-level directory for ripping files
+            tmpdir (str) : Top-level directory for full disc backups.
+                Final extracted files will be moved into outdir
             everything (bool) : If set, then all titles identified
                 for ripping will be ripped. By default, only the
                 main feature will be ripped
@@ -80,14 +83,18 @@ class DiscHandler(QtCore.QObject):
         self.DISC_METADATA_DIALOG.connect(self.disc_metadata_dialog)
         self.EXTRACT_TITLE.connect(self.extract_title)
 
+        self._backup = False
         self._cancelled = False
         self._delay_eject = False  # used during backup then tag
+
+        self._paths = {}
+        self._npaths = 0
+        self._nfail = 0
 
         self.cleanup = True
 
         self.backup_path = None
         self.mnt = None
-        self.paths = {}
 
         self.dev = dev
         self.outdir = outdir
@@ -112,10 +119,13 @@ class DiscHandler(QtCore.QObject):
         # help ensure not collisions
         drive, tail = os.path.splitdrive(dev)
         if drive == '':
-            tmpdir = os.path.basename(dev)
+            tmppath = os.path.basename(dev)
         else:
-            tmpdir = drive.rstrip(":") + "_drive"
-        self._tmpdir = os.path.join(outdir, tmpdir)
+            tmppath = drive.rstrip(":") + "_drive"
+        self._tmpdir = {
+            'extract': os.path.join(self.outdir, tmppath),
+            'backup': os.path.join(tmpdir, tmppath),
+        }
 
         self.hashid = None
         self.discid = utils.get_discid(dev, root)  # This is pretty quick
@@ -127,14 +137,29 @@ class DiscHandler(QtCore.QObject):
         self.dev_to_mnt.start()
 
     @property
+    def paths(self) -> dict:
+        return self._paths
+
+    @paths.setter
+    def paths(self, val):
+        self._paths = val
+        self._npaths = len(val)
+
+    @property
     def hash(self) -> str | None:
         return self.hashid or self.discid
 
     @property
     def tmpdir(self) -> str:
+        tmpdir = (
+            self._tmpdir['backup']
+            if self._backup else
+            self._tmpdir['extract']
+        )
+
         if self.hash is None:
-            return self._tmpdir
-        return f"{self._tmpdir}_{self.hash}"
+            return tmpdir
+        return f"{tmpdir}_{self.hash}"
 
     def isRunning(self):
         """
@@ -297,6 +322,7 @@ class DiscHandler(QtCore.QObject):
 
         # If we want to backup, then reopen metadata for tagging
         if result == metadata.BACKUP_THEN_TAG:
+            self._backup = True
             output = os.path.join(self.tmpdir, BACKUP_FILE)
             if self.use_existing_backup(output):
                 # If using existing, then call method and then return
@@ -444,15 +470,13 @@ class DiscHandler(QtCore.QObject):
         }
 
         # Get all paths to output files created during rip
-        self.paths.update(
-            dict(
-                path_utils.outfile(
-                    self.outdir,
-                    info,
-                    everything=True,
-                    extras=False,
-                    convention=convention,
-                )
+        self.paths = dict(
+            path_utils.outfile(
+                self.outdir,
+                info,
+                everything=True,
+                extras=False,
+                convention=convention,
             )
         )
 
@@ -468,6 +492,8 @@ class DiscHandler(QtCore.QObject):
             self.rip_finished(self.backup_path)
             return
 
+        self._backup = len(self.paths) > 1
+
         self.log.debug(
             "%s - Creating temporary directory : '%s'",
             self.dev,
@@ -478,7 +504,7 @@ class DiscHandler(QtCore.QObject):
         # Set up ripper based on single or multi-title rip
         # The FINISHED signal processing is specific to type
         # of rip
-        if len(self.paths) == 1:
+        if not self._backup:
             title, output = list(self.paths.items())[0]
             self.ripper = RipTitle(
                 self.dev,
@@ -586,6 +612,9 @@ class DiscHandler(QtCore.QObject):
             self.extractor.wait()
             self.extractor.deleteLater()
 
+        if previous_output != '':
+            self._nfail += not os.path.exists(previous_output)
+
         # If there are still titles to extract (paths left) AND we have
         # not had a cancel event
         if len(self.paths) > 0 and not self._cancelled:
@@ -616,7 +645,13 @@ class DiscHandler(QtCore.QObject):
         self.extractor = None
         self.progress.MKV_REMOVE_DISC.emit(self.backup_path)
 
-        if self.cleanup:
+        if self._nfail > 0:
+            self.log.warning(
+                "%s - Extraction(s) failed, leaving temporary directory: %s",
+                self.dev,
+                self.tmpdir,
+            )
+        elif self.cleanup:
             # Attempt to remove the backup (tmp) file
             self.log.debug(
                 "%s - Removing temporary directory: %s",

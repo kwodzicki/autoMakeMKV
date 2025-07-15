@@ -33,6 +33,7 @@ def load_settings() -> dict:
         settings = {
             'dbdir': DBDIR,
             'outdir': OUTDIR,
+            'tmpdir': OUTDIR,
             'everything': False,
             'extras': False,
             'show_status': True,

@@ -28,11 +28,11 @@ class PathSelector(QtWidgets.QWidget):
 
         self.setLayout(layout)
 
-    def setText(self, var):
+    def setText(self, var: str) -> None:
 
         self.path_text.setText(var)
 
-    def getText(self):
+    def getText(self) -> str:
 
         return self.path_text.text()
 
@@ -45,3 +45,18 @@ class PathSelector(QtWidgets.QWidget):
         if path != '' and os.path.isdir(path):
             self.setText(path)
             self.log.info(path)
+
+    def setToolTip(self, txt: str) -> None:
+        """
+        Set ToolTip for objects
+
+        Sets the ToolTip for the line edit widget and the button to the
+        input string
+
+        Arguments:
+            txt (str): Text for ToolTip
+
+        """
+
+        self.path_text.setToolTip(txt)
+        self.path_button.setToolTip(txt)

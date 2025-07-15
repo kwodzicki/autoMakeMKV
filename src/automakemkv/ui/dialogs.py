@@ -304,6 +304,25 @@ class SettingsWidget(QtWidgets.QWidget):
 
         self.dbdir = widgets.PathSelector('Database Location:')
         self.outdir = widgets.PathSelector('Output Location:')
+        self.tmpdir = widgets.PathSelector('Temporary Location:')
+        self.same = QtWidgets.QPushButton('Temporary same as output')
+
+        self.same.clicked.connect(self._tmp_match_output)
+
+        self.dbdir.setToolTip(
+            "Sets the directory/folder where database JSON files are located"
+        )
+        self.outdir.setToolTip(
+            "Sets the directory/folder where titles are extracted to"
+        )
+        self.tmpdir.setToolTip(
+            "Sets the directory/folder to backup discs to. This is only "
+            "used when multiple titles are extracted; i.e., when a full disc "
+            "backup is required"
+        )
+        self.same.setToolTip(
+            'Click to set temporary directory/folder to same as output'
+        )
 
         self.convention_label = QtWidgets.QLabel('Output naming convention')
         self.convention = QtWidgets.QComboBox()
@@ -325,10 +344,20 @@ class SettingsWidget(QtWidgets.QWidget):
         layout = QtWidgets.QVBoxLayout()
         layout.addWidget(self.dbdir)
         layout.addWidget(self.outdir)
+        layout.addWidget(self.tmpdir)
+        layout.addWidget(self.same)
+        layout.addSpacerItem(
+            QtWidgets.QSpacerItem(40, 20)
+        )
         layout.addWidget(self.convention_label)
         layout.addWidget(self.convention)
         layout.addWidget(radio_widget)
         self.setLayout(layout)
+
+    def _tmp_match_output(self, *args, **kwargs):
+        self.tmpdir.setText(
+            self.outdir.getText()
+        )
 
     def set_settings(self, settings: dict | None = None):
 
@@ -340,6 +369,8 @@ class SettingsWidget(QtWidgets.QWidget):
             self.dbdir.setText(settings['dbdir'])
         if 'outdir' in settings:
             self.outdir.setText(settings['outdir'])
+        if 'tmpdir' in settings:
+            self.tmpdir.setText(settings['tmpdir'])
         if 'everything' in settings:
             self.everything.setChecked(settings['everything'])
         if 'extras' in settings:
@@ -354,10 +385,14 @@ class SettingsWidget(QtWidgets.QWidget):
         settings = {
             'dbdir': self.dbdir.getText(),
             'outdir': self.outdir.getText(),
+            'tmpdir': self.tmpdir.getText(),
             'extras': self.extras.isChecked(),
             'everything': self.everything.isChecked(),
             'convention': self.convention.currentText(),
         }
+        if settings['tmpdir'] == '':
+            settings['tmpdir'] = settings['outdir']
+
         if save:
             utils.save_settings(settings)
 

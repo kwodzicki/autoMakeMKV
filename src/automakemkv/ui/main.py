@@ -150,6 +150,7 @@ class SystemTray(QtWidgets.QSystemTrayIcon):
 
         dirs = {
             'outdir': 'Output',
+            'tmpdir': 'Temporary',
             'dbdir': 'Database',
         }
         for dir, lname in dirs.items():

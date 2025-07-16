@@ -54,6 +54,7 @@ class BaseWatchdog(QtCore.QThread):
         self.HANDLE_INSERT.connect(self.handle_insert)
 
         self._outdir = None
+        self._tmpdir = None
         self._mounted = []
         self._failure = []
         self._success = []
@@ -61,8 +62,8 @@ class BaseWatchdog(QtCore.QThread):
         self.progress = progress
 
         self.dbdir = kwargs.get('dbdir', DBDIR)
+        self.tmpdir = kwargs.get('tmpdir', outdir)
         self.outdir = outdir
-        self.tmpdir = outdir
         self.everything = everything
         self.extras = extras
         self.convention = convention
@@ -76,6 +77,15 @@ class BaseWatchdog(QtCore.QThread):
     def outdir(self, val):
         self.log.info('Output directory set to : %s', val)
         self._outdir = val
+
+    @property
+    def tmpdir(self):
+        return self._tmpdir
+
+    @tmpdir.setter
+    def tmpdir(self, val):
+        self.log.info('Temporary directory set to : %s', val)
+        self._tmpdir = val
 
     def set_settings(self, **kwargs):
         """

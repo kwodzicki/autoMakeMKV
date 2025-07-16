@@ -5,9 +5,11 @@ Utilities for ripping titles
 
 import logging
 import os
+import time
 import copy
 import shutil
 import subprocess
+from threading import Event
 
 from PyQt5 import QtCore
 
@@ -518,6 +520,7 @@ class DiscHandler(QtCore.QObject):
             output = os.path.join(self.tmpdir, BACKUP_FILE)
             if self.use_existing_backup(output):
                 # If using existing, then call method and then return
+                self.EJECT_DISC.emit()
                 self.rip_finished(output)
                 return
 
@@ -1067,6 +1070,7 @@ class ExtractFromBluRay(QtCore.QThread):
     """
 
     FAILURE = QtCore.pyqtSignal(str)
+    CANCEL = QtCore.pyqtSignal()
     SUCCESS = QtCore.pyqtSignal(str)
     FINISHED = QtCore.pyqtSignal(str)
 
@@ -1097,7 +1101,11 @@ class ExtractFromBluRay(QtCore.QThread):
         super().__init__()
 
         self.log = logging.getLogger(__name__)
+        self._running = Event()
+        self._running.set()
+
         self._result = None
+        self.proc = None
 
         self.src = src
         self.paths = paths
@@ -1105,9 +1113,20 @@ class ExtractFromBluRay(QtCore.QThread):
         self.progress = progress
         self.title = tuple(self.paths.keys())[0]
 
+        self.CANCEL.connect(self.cancel)
+
     @property
     def result(self):
         return self._result
+
+    @QtCore.pyqtSlot()
+    def cancel(self):
+        """Kill the MakeMKV Process"""
+        self.log.info('%s - Cancel request', self.src)
+        self._running.clear()
+        if self.proc:
+            self.log.info('%s - Killing process', self.src)
+            self.proc.kill()
 
     def run(self):
         """Run thread"""
@@ -1176,8 +1195,10 @@ class ExtractFromBluRay(QtCore.QThread):
             )
             return False
 
+        outtmp, _ = os.path.splitext(self.src)
+        outtmp = f"{outtmp}.mkv"
         # Build mkvmerge command to run
-        cmd = [MKVMERGE, '-o', output]
+        cmd = [MKVMERGE, '-o', outtmp]
         if lang is not None:
             cmd.extend(lang_opts)
         cmd.append(title_src)
@@ -1192,9 +1213,57 @@ class ExtractFromBluRay(QtCore.QThread):
         # Set current track on progress
         self.progress.MKV_CUR_TRACK.emit(self.src, self.title)
         self.progress.MKV_NEW_PROCESS.emit(self.src, self.proc, 'stdout')
+
+        # A sleep to wait for signals to be set up
+        time.sleep(0.5)
+
+        prog = self.progress.get_widget(self.src)
+        if prog is not None:
+            prog.PROGRESS_TITLE.emit('PRGC', 'Extracting title')
+            prog.PROGRESS_TITLE.emit('PRGT', 'Progress')
+
+        # Wait for process (mkvmerge) to finish
         self.proc.wait()
 
         if self.proc.returncode != 0:
+            try:
+                os.remove(outtmp)  # Delete the file on failure
+            except Exception:
+                pass
+            self.FAILURE.emit(output)
+            return False
+
+        if prog is not None:
+            prog.PROGRESS_TITLE.emit('PRGC', 'Moving file')
+
+        # File move with progress
+        total_size = os.path.getsize(outtmp)
+        copied = 0
+        buff = 2**20
+        with open(outtmp, 'rb') as src, open(output, 'wb') as dst:
+            while self._running.is_set():
+                chunk = src.read(buff)
+                if not chunk:
+                    break
+                dst.write(chunk)
+                copied += len(chunk)
+
+                percent = (copied / total_size) * 100
+                if prog is not None:
+                    prog.PROGRESS_VALUE.emit(
+                        int(percent),
+                        int(percent / 2) + 50,
+                        100,
+                    )
+        os.remove(outtmp)
+
+        # Check for running; will not be set if ripper cancelled
+        if not self._running.is_set():
+            try:
+                os.remove(output)  # Delete the file on failure
+            except Exception:
+                pass
+
             self.FAILURE.emit(output)
             return False
 

@@ -27,6 +27,8 @@ PLAYLIST_EXT = '.mpls'
 STREAM_DIR = ('BDMV', 'STREAM')
 STREAM_EXT = '.m2ts'
 BACKUP_FILE = 'image.iso'
+BUFFER_SIZE = 2**20 * 25
+
 MAKEMKV_SETTINGS = utils.load_makemkv_settings()
 
 
@@ -93,7 +95,7 @@ class DiscHandler(QtCore.QObject):
         self._npaths = 0
         self._nfail = 0
 
-        self.cleanup = True
+        self.cleanup = False
 
         self.backup_path = None
         self.mnt = None
@@ -1217,10 +1219,14 @@ class ExtractFromBluRay(QtCore.QThread):
         # A sleep to wait for signals to be set up
         time.sleep(0.5)
 
-        prog = self.progress.get_widget(self.src)
-        if prog is not None:
-            prog.PROGRESS_TITLE.emit('PRGC', 'Extracting title')
-            prog.PROGRESS_TITLE.emit('PRGT', 'Progress')
+        # Set the track progress title (PRGC) and the overall progress
+        # title (PRGT); codes are from MakeMKV
+        self.progress.MKV_PROGRESS_TITLE.emit(
+            self.src, 'PRGC', 'Extracting title',
+        )
+        self.progress.MKV_PROGRESS_TITLE.emit(
+            self.src, 'PRGT', 'Progress',
+        )
 
         # Wait for process (mkvmerge) to finish
         self.proc.wait()
@@ -1233,28 +1239,30 @@ class ExtractFromBluRay(QtCore.QThread):
             self.FAILURE.emit(output)
             return False
 
-        if prog is not None:
-            prog.PROGRESS_TITLE.emit('PRGC', 'Moving file')
+        # Update the track proress title
+        self.progress.MKV_PROGRESS_TITLE.emit(self.src, 'PRGC', 'Moving file')
 
         # File move with progress
         total_size = os.path.getsize(outtmp)
         copied = 0
-        buff = 2**20
-        with open(outtmp, 'rb') as src, open(output, 'wb') as dst:
+        with open(outtmp, mode='rb') as src, open(output, mode='wb') as dst:
             while self._running.is_set():
-                chunk = src.read(buff)
+                chunk = src.read(BUFFER_SIZE)
                 if not chunk:
                     break
-                dst.write(chunk)
-                copied += len(chunk)
+                copied += dst.write(chunk)
 
+                # Compute copied percentage
                 percent = (copied / total_size) * 100
-                if prog is not None:
-                    prog.PROGRESS_VALUE.emit(
-                        int(percent),
-                        int(percent / 2) + 50,
-                        100,
-                    )
+                # Update the progress bars; note that overall progress is
+                # half of copy progress + 50 as the MKVMERGE was the first
+                # 50% of progress
+                self.progress.MKV_PROGRESS_VALUE.emit(
+                    self.src,
+                    int(percent),
+                    int(percent / 2) + 50,
+                    100,
+                )
         os.remove(outtmp)
 
         # Check for running; will not be set if ripper cancelled

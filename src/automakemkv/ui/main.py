@@ -170,7 +170,6 @@ class SystemTray(QtWidgets.QSystemTrayIcon):
             if path != '':
                 setattr(self.watchdog, dir, path)
                 settings = self.watchdog.get_settings()
-                print(settings)
                 utils.save_settings(settings)
                 continue
 

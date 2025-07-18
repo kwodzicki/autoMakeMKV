@@ -4,10 +4,12 @@ import sys
 import shutil
 import re
 import json
+import subprocess
 
 if sys.platform.startswith('win'):
     import wmi
     import pythoncom
+    import ctypes
 
 from .. import OUTDIR, DBDIR, SETTINGS_FILE
 
@@ -18,6 +20,8 @@ TRACKSIZE_AP = 11  # Number used for track size in TINFO from MakeMKV
 TRACKSIZE_REG = re.compile(
     rf"TINFO:(\d+),{TRACKSIZE_AP},\d+,\"(\d+)\"",
 )
+
+MOUNT_TYPES = ("nfs", "nfs4", "cifs", "smbfs", "sshfs", "webdav", "afp")
 
 
 def load_settings() -> dict:
@@ -226,3 +230,150 @@ def windows_vendor_model(path: str) -> tuple[str]:
         return cd.Name, ''
 
     return '', ''
+
+
+def is_remote_path(path: str) -> bool:
+    """
+    Determine if the given path is located on a remote filesystem
+
+    This function detects remote filesystems on Windows, Linux, and macOS
+    using platform-specific methods and filesystem type checks.
+
+    Args:
+        path (str): The path to check.
+
+    Returns:
+        bool: True if the path is on a remote share, False if it's on a local
+            filesystem.
+
+    """
+
+    system = sys.platform
+    if system.startswith("win"):
+        return is_remote_path_windows(path)
+    if system.startswith("linux"):
+        return is_remote_path_linux(path)
+    if system.startswith("darwin"):
+        return is_remote_path_macos(path)
+    raise NotImplementedError(f"Unsupported platform: {system}")
+
+
+def is_remote_path_windows(path):
+    """
+    Check if a given path on Windows is on a remote network share.
+
+    This uses the Windows API function GetDriveTypeW via ctypes to determine
+    if the drive type is DRIVE_REMOTE.
+
+    Args:
+        path (str): The path to check.
+
+    Returns:
+        bool: True if the path is on a remote share, False otherwise.
+    """
+
+    DRIVE_REMOTE = 4
+
+    path = os.path.abspath(path)
+    if not path.endswith("\\"):
+        path = os.path.splitdrive(path)[0] + "\\"
+
+    GetDriveTypeW = ctypes.windll.kernel32.GetDriveTypeW
+    GetDriveTypeW.argtypes = [ctypes.c_wchar_p]
+    GetDriveTypeW.restype = ctypes.c_uint
+
+    drive_type = GetDriveTypeW(path)
+    return drive_type == DRIVE_REMOTE
+
+
+def is_remote_path_linux(path: str) -> bool:
+    """
+    Check if a given path on Linux is mounted from a remote filesystem.
+
+    This attempts detection via /proc/mounts, /etc/mtab, and known GVFS paths,
+    and checks for remote fs types like cifs, nfs, smbfs, sshfs, etc.
+
+    Args:
+        path (str): The path to check.
+
+    Returns:
+        bool: True if the path is on a remote share, False otherwise.
+    """
+
+    # 1. Check /proc/mounts
+    if check_mounts_file("/proc/mounts", path):
+        return True
+
+    # 2. Check /etc/mtab
+    if check_mounts_file("/etc/mtab", path):
+        return True
+
+    # 3. Check if under GVFS mount
+    uid = os.getuid()
+    gvfs_path = f"/run/user/{uid}/gvfs"
+    try:
+        real_path = os.path.realpath(path)
+        if real_path.startswith(gvfs_path):
+            return True
+    except Exception:
+        pass
+
+    return False
+
+
+def check_mounts_file(mounts_file: str, path: str) -> bool:
+    """
+    Check given mount file for path
+
+    Arguments:
+        mounts_file (str): Path to mounts file to check for path
+        path (str): Mount point of file system to check is remote
+
+    Returns:
+        bool: True if remote, False if local or failed to find
+
+    """
+
+    try:
+        with open(mounts_file, "r") as f:
+            for line in f:
+                parts = line.split()
+                if len(parts) < 3:
+                    continue
+                mount_point = parts[1]
+                fs_type = parts[2]
+                if path.startswith(mount_point) and fs_type in MOUNT_TYPES:
+                    return True
+    except Exception:
+        pass
+    return False
+
+
+def is_remote_path_macos(path: str) -> bool:
+    """
+    Check if a given path on macOS is mounted from a remote filesystem.
+
+    This uses the `mount` command and parses its output to identify remote
+    filesystem types (e.g., smbfs, nfs, afp, webdav).
+
+    Args:
+        path (str): The path to check.
+
+    Returns:
+        bool: True if the path is on a remote share, False otherwise.
+
+    """
+
+    try:
+        path = os.path.abspath(path)
+        output = subprocess.check_output(["mount"], text=True)
+        for line in output.splitlines():
+            if "on " in line and "type " in line:
+                parts = line.split()
+                mount_point = parts[2]
+                fs_type = parts[4]
+                if path.startswith(mount_point) and fs_type in MOUNT_TYPES:
+                    return True
+        return False
+    except Exception:
+        return False

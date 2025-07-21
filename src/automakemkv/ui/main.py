@@ -27,7 +27,7 @@ class SystemTray(QtWidgets.QSystemTrayIcon):
 
     """
 
-    def __init__(self, app, name=NAME):
+    def __init__(self, app, name=NAME, cleanup: bool = True):
 
         super().__init__(QtGui.QIcon(TRAY_ICON), app)
 
@@ -68,6 +68,7 @@ class SystemTray(QtWidgets.QSystemTrayIcon):
         self.progress = progress.ProgressDialog()
         self.watchdog = disc_watchdog.Watchdog(
             self.progress,
+            cleanup=cleanup,
             **settings,
         )
         self.watchdog.start()
@@ -185,6 +186,12 @@ def cli():
         help='Set logging level',
     )
 
+    parser.add_argument(
+        '--no-cleanup',
+        action='store_true',
+        help='If set, then any disc backups will NOT be cleaned up.',
+    )
+
     args = parser.parse_args()
 
     ROTFILE.setLevel(args.loglevel)
@@ -195,6 +202,6 @@ def cli():
     app.setApplicationName(NAME)
     app.setWindowIcon(QtGui.QIcon(APP_ICON))
     app.setQuitOnLastWindowClosed(False)
-    _ = SystemTray(app)
+    _ = SystemTray(app, cleanup=not args.no_cleanup)
     res = app.exec_()
     sys.exit(res)

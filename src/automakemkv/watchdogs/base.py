@@ -46,6 +46,7 @@ class BaseWatchdog(QtCore.QThread):
         extras: bool = False,
         convention: str = 'video_utils',
         root: str = UUID_ROOT,
+        cleanup: bool = True,
         **kwargs,
     ):
         super().__init__()
@@ -53,6 +54,7 @@ class BaseWatchdog(QtCore.QThread):
 
         self.HANDLE_INSERT.connect(self.handle_insert)
 
+        self._cleanup = cleanup
         self._outdir = None
         self._tmpdir = None
         self._mounted = []
@@ -184,6 +186,7 @@ class BaseWatchdog(QtCore.QThread):
             self.dbdir,
             self.root,
             self.progress,
+            cleanup=self._cleanup,
         )
 
         obj.FAILURE.connect(self.rip_failure)

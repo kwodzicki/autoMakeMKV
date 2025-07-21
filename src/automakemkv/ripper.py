@@ -59,6 +59,7 @@ class DiscHandler(QtCore.QObject):
         dbdir: str,
         root: str,
         progress,
+        cleanup: bool = True,
         **kwargs,
     ):
         """
@@ -95,8 +96,6 @@ class DiscHandler(QtCore.QObject):
         self._npaths = 0
         self._nfail = 0
 
-        self.cleanup = False
-
         self.backup_path = None
         self.mnt = None
 
@@ -109,6 +108,8 @@ class DiscHandler(QtCore.QObject):
         self.convention = convention
         self.progress = progress
         self.progress.CANCEL.connect(self.cancel)
+
+        self.cleanup = cleanup
 
         self.disc_hasher = None
         self.options = None

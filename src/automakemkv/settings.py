@@ -118,7 +118,7 @@ class Settings(QtCore.QObject):
     def convention(self, val: str):
         self._settings['convention'] = val
 
-    def load(self) -> dict:
+    def load(self, cancel: bool = False) -> dict:
         """
         Load dict from data JSON file
 
@@ -133,11 +133,27 @@ class Settings(QtCore.QObject):
                     'Loading settings from %s', self._settings_file,
                 )
                 with open(self._settings_file, 'r') as fid:
-                    self.update(json.load(fid), no_save=True)
+                    settings = json.load(fid)
 
+                if cancel:
+                    return settings
+
+                self.update(settings, no_save=True)
                 return
 
         self.save()
+
+    def cancel(self):
+        """
+        Used to cancel changes; just reload settings file without checks
+
+        """
+
+        self._log.debug("Canceling settings changes")
+
+        settings = self.load(cancel=True)
+        self._settings.update(settings)
+        self._is_remote = is_remote_path(self.outdir)
 
     def update(
         self,

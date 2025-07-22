@@ -82,6 +82,8 @@ class SystemTray(QtWidgets.QSystemTrayIcon):
         settings_widget = dialogs.SettingsDialog()
         if settings_widget.exec_():
             SETTINGS.save()
+        elif settings_widget.changed:
+            SETTINGS.cancel()
 
     def metadata_widget(self, *args, **kwargs):
         """
@@ -167,7 +169,6 @@ class SystemTray(QtWidgets.QSystemTrayIcon):
                 continue
 
             self.settings_load_check()
-        print('finished')
 
 
 def cli():

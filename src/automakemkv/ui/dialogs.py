@@ -295,11 +295,17 @@ class SettingsDialog(QtWidgets.QDialog):
 
         self.setLayout(layout)
 
+    @property
+    def changed(self) -> bool:
+        return self.widget.changed
+
 
 class SettingsWidget(QtWidgets.QWidget):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+
+        self.changed = False
 
         self.outdir = widgets.PathSelector('Output Location:')
         self.dbdir = widgets.PathSelector('Database Location:')
@@ -360,18 +366,22 @@ class SettingsWidget(QtWidgets.QWidget):
 
     @QtCore.pyqtSlot(str)
     def update_dbdir(self, val: str):
+        self.changed = True
         SETTINGS.update(dbdir=val, no_save=True)
 
     @QtCore.pyqtSlot(str)
     def update_outdir(self, val: str):
+        self.changed = True
         SETTINGS.update(outdir=val, no_save=True)
 
     @QtCore.pyqtSlot(str)
     def update_convention(self, val: str):
+        self.changed = True
         SETTINGS.update(convention=val, no_save=True)
 
     @QtCore.pyqtSlot(bool)
     def update_titles(self, val: bool):
+        self.changed = True
         SETTINGS.update(
             extras=self.extras.isChecked(),
             everything=self.everything.isChecked(),

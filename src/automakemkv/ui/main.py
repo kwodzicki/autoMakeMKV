@@ -7,11 +7,10 @@ from PyQt5 import QtWidgets
 from PyQt5 import QtCore
 from PyQt5 import QtGui
 
-from .. import LOG, STREAM, ROTFILE, NAME, APP_ICON, TRAY_ICON
+from .. import LOG, STREAM, ROTFILE, NAME, APP_ICON, TRAY_ICON, SETTINGS
 from . import metadata
 from . import progress
 from . import dialogs
-from . import utils
 
 if sys.platform.startswith('linux'):
     from ..watchdogs import linux as disc_watchdog
@@ -63,13 +62,10 @@ class SystemTray(QtWidgets.QSystemTrayIcon):
         self.setContextMenu(self._menu)
         self.setVisible(True)
 
-        settings = utils.load_settings()
-
         self.progress = progress.ProgressDialog()
         self.watchdog = disc_watchdog.Watchdog(
             self.progress,
             cleanup=cleanup,
-            **settings,
         )
         self.watchdog.start()
 
@@ -77,7 +73,7 @@ class SystemTray(QtWidgets.QSystemTrayIcon):
         # loop starts
         QtCore.QTimer.singleShot(
             0,
-            self.check_dirs_exists,
+            self.settings_load_check,
         )
 
     def settings_widget(self, *args, **kwargs):
@@ -85,9 +81,7 @@ class SystemTray(QtWidgets.QSystemTrayIcon):
         self.__log.debug('opening settings')
         settings_widget = dialogs.SettingsDialog()
         if settings_widget.exec_():
-            self.watchdog.set_settings(
-                **settings_widget.get_settings(),
-            )
+            SETTINGS.save()
 
     def metadata_widget(self, *args, **kwargs):
         """
@@ -105,7 +99,7 @@ class SystemTray(QtWidgets.QSystemTrayIcon):
         self.metadata = metadata.DiscMetadataEditor(
             '',
             '',
-            self.watchdog.dbdir,
+            SETTINGS.dbdir,
         )
         self.metadata.finished.connect(self.metadata_close)
 
@@ -119,9 +113,7 @@ class SystemTray(QtWidgets.QSystemTrayIcon):
         """Display quit confirm dialog"""
         self.__log.info('Quitting program')
 
-        utils.save_settings(
-            self.watchdog.get_settings(),
-        )
+        SETTINGS.save()
 
         if kwargs.get('force', False):
             self.__log.info('Force quit')
@@ -143,19 +135,20 @@ class SystemTray(QtWidgets.QSystemTrayIcon):
             self.watchdog.wait()
             self._app.quit()
 
-    def check_dirs_exists(self):
+    def settings_load_check(self):
         """
         Check that video output directory exists
 
         """
 
+        SETTINGS.load()
+
         dirs = {
             'outdir': 'Output',
-            'tmpdir': 'Temporary',
             'dbdir': 'Database',
         }
-        for dir, lname in dirs.items():
-            val = getattr(self.watchdog, dir)
+        for key, lname in dirs.items():
+            val = getattr(SETTINGS, key)
             if os.path.isdir(val):
                 continue
 
@@ -169,12 +162,12 @@ class SystemTray(QtWidgets.QSystemTrayIcon):
                 f'{self._name}: Select {lname} Folder',
             )
             if path != '':
-                setattr(self.watchdog, dir, path)
-                settings = self.watchdog.get_settings()
-                utils.save_settings(settings)
+                setattr(SETTINGS, key, path)
+                SETTINGS.save()
                 continue
 
-            self.check_dirs_exists()
+            self.settings_load_check()
+        print('finished')
 
 
 def cli():

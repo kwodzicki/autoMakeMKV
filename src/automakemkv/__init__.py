@@ -6,6 +6,8 @@ import sys
 import shutil
 from importlib.metadata import metadata as pkg_metadata
 
+from . import settings
+
 UUID_ROOT = "/dev/disk/by-uuid"
 LABEL_ROOT = "/dev/disk/by-label"
 
@@ -107,6 +109,9 @@ ROTFILE.setFormatter(
 
 LOG.addHandler(STREAM)
 LOG.addHandler(ROTFILE)
+
+# Package-wide user settings object
+SETTINGS = settings.Settings(SETTINGS_FILE, OUTDIR, DBDIR, NAME)
 
 meta = pkg_metadata(__name__)
 __version__ = meta.json['version']

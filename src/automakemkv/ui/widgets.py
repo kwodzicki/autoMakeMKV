@@ -28,6 +28,10 @@ class PathSelector(QtWidgets.QWidget):
 
         self.setLayout(layout)
 
+    def connectChanged(self, func):
+
+        self.path_text.textChanged.connect(func)
+
     def setText(self, var: str) -> None:
 
         self.path_text.setText(var)

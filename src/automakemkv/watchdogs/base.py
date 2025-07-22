@@ -12,7 +12,7 @@ from PyQt5 import QtCore
 if sys.platform.startswith('win'):
     import ctypes
 
-from .. import UUID_ROOT, OUTDIR, DBDIR
+from .. import UUID_ROOT
 from .. import ripper
 from ..ui import dialogs
 
@@ -41,10 +41,6 @@ class BaseWatchdog(QtCore.QThread):
         self,
         progress,
         *args,
-        outdir: str = OUTDIR,
-        everything: bool = False,
-        extras: bool = False,
-        convention: str = 'video_utils',
         root: str = UUID_ROOT,
         cleanup: bool = True,
         **kwargs,
@@ -55,64 +51,12 @@ class BaseWatchdog(QtCore.QThread):
         self.HANDLE_INSERT.connect(self.handle_insert)
 
         self._cleanup = cleanup
-        self._outdir = None
-        self._tmpdir = None
         self._mounted = []
         self._failure = []
         self._success = []
 
         self.progress = progress
-
-        self.dbdir = kwargs.get('dbdir', DBDIR)
-        self.tmpdir = kwargs.get('tmpdir', outdir)
-        self.outdir = outdir
-        self.everything = everything
-        self.extras = extras
-        self.convention = convention
         self.root = root
-
-    @property
-    def outdir(self):
-        return self._outdir
-
-    @outdir.setter
-    def outdir(self, val):
-        self.log.info('Output directory set to : %s', val)
-        self._outdir = val
-
-    @property
-    def tmpdir(self):
-        return self._tmpdir
-
-    @tmpdir.setter
-    def tmpdir(self, val):
-        self.log.info('Temporary directory set to : %s', val)
-        self._tmpdir = val
-
-    def set_settings(self, **kwargs):
-        """
-        Set options for ripping discs
-
-        """
-
-        self.log.debug('Updating ripping options')
-        self.dbdir = kwargs.get('dbdir', self.dbdir)
-        self.outdir = kwargs.get('outdir', self.outdir)
-        self.tmpdir = kwargs.get('tmpdir', self.tmpdir)
-        self.everything = kwargs.get('everything', self.everything)
-        self.extras = kwargs.get('extras', self.extras)
-        self.convention = kwargs.get('convention', self.convention)
-
-    def get_settings(self):
-
-        return {
-            'dbdir': self.dbdir,
-            'outdir': self.outdir,
-            'tmpdir': self.tmpdir,
-            'everything': self.everything,
-            'extras': self.extras,
-            'convention': self.convention,
-        }
 
     def quit(self, *args, **kwargs):
         RUNNING.set()
@@ -178,12 +122,6 @@ class BaseWatchdog(QtCore.QThread):
 
         obj = ripper.DiscHandler(
             dev,
-            self.outdir,
-            self.tmpdir,
-            self.everything,
-            self.extras,
-            self.convention,
-            self.dbdir,
             self.root,
             self.progress,
             cleanup=self._cleanup,

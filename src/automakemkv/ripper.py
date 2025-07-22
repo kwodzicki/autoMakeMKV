@@ -13,6 +13,7 @@ from threading import Event
 
 from PyQt5 import QtCore
 
+from . import SETTINGS
 from . import MKVMERGE
 from . import utils
 from . import disc_hash
@@ -51,12 +52,6 @@ class DiscHandler(QtCore.QObject):
     def __init__(
         self,
         dev: str,
-        outdir: str,
-        tmpdir: str,
-        everything: bool,
-        extras: bool,
-        convention: str,
-        dbdir: str,
         root: str,
         progress,
         cleanup: bool = True,
@@ -65,20 +60,9 @@ class DiscHandler(QtCore.QObject):
         """
         Arguments:
             dev (str): Dev device
-            outdir (str) : Top-level directory for ripping files
-            tmpdir (str) : Top-level directory for full disc backups.
-                Final extracted files will be moved into outdir
-            everything (bool) : If set, then all titles identified
-                for ripping will be ripped. By default, only the
-                main feature will be ripped
-            extras (bool) : If set, only 'extra' features will
-                be ripped along with the main title(s). Main
-                title(s) include Theatrical/Extended/etc.
-                versions for movies, and episodes for series.
             root (str) : Location of the 'by-uuid' directory
                 where discs are mounted. This is used to
                 get the unique ID of the disc.
-            convention (str) : Output naming convention to use for
 
         """
 
@@ -96,16 +80,12 @@ class DiscHandler(QtCore.QObject):
         self._npaths = 0
         self._nfail = 0
 
+        self.is_bluray = False
         self.backup_path = None
         self.mnt = None
 
         self.dev = dev
-        self.outdir = outdir
-        self.everything = everything
-        self.extras = extras
-        self.dbdir = dbdir
         self.root = root
-        self.convention = convention
         self.progress = progress
         self.progress.CANCEL.connect(self.cancel)
 
@@ -127,9 +107,10 @@ class DiscHandler(QtCore.QObject):
             tmppath = os.path.basename(dev)
         else:
             tmppath = drive.rstrip(":") + "_drive"
+
         self._tmpdir = {
-            'extract': os.path.join(self.outdir, tmppath),
-            'backup': os.path.join(tmpdir, tmppath),
+            'extract': os.path.join(SETTINGS.outdir, tmppath),
+            'backup': os.path.join(SETTINGS.tmpdir, tmppath),
         }
 
         self.hashid = None
@@ -158,7 +139,7 @@ class DiscHandler(QtCore.QObject):
     def tmpdir(self) -> str:
         tmpdir = (
             self._tmpdir['backup']
-            if self._backup else
+            if self._backup and self.is_bluray else
             self._tmpdir['extract']
         )
 
@@ -249,8 +230,8 @@ class DiscHandler(QtCore.QObject):
         self.disc_hasher.FINISHED.connect(self.disc_lookup)
         self.disc_hasher.start()
 
-    @QtCore.pyqtSlot(str)
-    def disc_lookup(self, hashid: str):
+    @QtCore.pyqtSlot(str, bool)
+    def disc_lookup(self, hashid: str, is_bluray: bool):
         """
         Get information about a disc
 
@@ -266,6 +247,7 @@ class DiscHandler(QtCore.QObject):
             self.disc_hasher.wait()  # Should be quick
             self.disc_hasher.deleteLater()
 
+        self.is_bluray = is_bluray
         # If hash is an emtpy string, then ensure that attribute is None
         self.hashid = hashid if hashid != '' else None
 
@@ -284,7 +266,7 @@ class DiscHandler(QtCore.QObject):
             self.dev,
             discid=self.discid,
             hashid=self.hashid,
-            dbdir=self.dbdir,
+            dbdir=SETTINGS.dbdir,
         )
 
         # Open dics metadata GUI and register "callback" for when closes
@@ -365,9 +347,9 @@ class DiscHandler(QtCore.QObject):
         self.options = metadata.ExistingDiscOptions(
             self.dev,
             self.info,
-            self.convention,
-            self.extras,
-            self.everything,
+            SETTINGS.convention,
+            SETTINGS.extras,
+            SETTINGS.everything,
         )
         self.options.FINISHED.connect(self.handle_metadata)
 
@@ -378,7 +360,7 @@ class DiscHandler(QtCore.QObject):
         self.metadata = metadata.DiscMetadataEditor(
             self.dev,
             self.hashid,
-            self.dbdir,
+            SETTINGS.dbdir,
             load_existing=load_existing,
         )
         self.metadata.FINISHED.connect(self.existing_disc)
@@ -402,7 +384,7 @@ class DiscHandler(QtCore.QObject):
         self.metadata = metadata.DiscMetadataEditor(
             self.dev,
             self.hashid,
-            self.dbdir,
+            SETTINGS.dbdir,
             load_existing=True,
             backed_up=True,
         )
@@ -477,7 +459,7 @@ class DiscHandler(QtCore.QObject):
         # Get all paths to output files created during rip
         self.paths = dict(
             path_utils.outfile(
-                self.outdir,
+                SETTINGS.outdir,
                 info,
                 everything=True,
                 extras=False,

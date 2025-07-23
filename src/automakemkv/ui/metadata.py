@@ -208,22 +208,9 @@ class DiscMetadataEditor(dialogs.MyQDialog):
             self.log.debug('No disc metadata')
             return
 
-        if self.curTitle is not None:
-            self.curTitle.info.update(
-                self.titleMetadata.getInfo()
-            )
-
-        titles = {}
-        root = self.titleTree.invisibleRootItem()
-        for i in range(root.childCount()):
-            titleObj = root.child(i)  # Get the object from the QTreeWidget
-            if titleObj.checkState(0) == 0:
-                continue
-
-            if not check_info(self, titleObj.info):
-                return
-
-            titles[titleObj.titleID] = titleObj.info
+        titles = self.getTitleInfo()
+        if titles is None:
+            return
 
         if len(titles) == 0:
             self.log.info('No titles marked for ripping!')
@@ -272,7 +259,8 @@ class DiscMetadataEditor(dialogs.MyQDialog):
             self.log.debug('No disc metadata')
             return
 
-        info['titles'] = {}  # Empty titles for now
+        titles = self.getTitleInfo()
+        info['titles'] = {} if titles is None else titles
 
         message = QtWidgets.QMessageBox()
         res = message.question(
@@ -296,6 +284,31 @@ class DiscMetadataEditor(dialogs.MyQDialog):
             )
             self.info = info
             self.done(BACKUP_THEN_TAG)
+
+    def getTitleInfo(self) -> dict | None:
+        """
+        Get information about which titles to extract
+
+        """
+
+        if self.curTitle is not None:
+            self.curTitle.info.update(
+                self.titleMetadata.getInfo()
+            )
+
+        titles = {}
+        root = self.titleTree.invisibleRootItem()
+        for i in range(root.childCount()):
+            titleObj = root.child(i)  # Get the object from the QTreeWidget
+            if titleObj.checkState(0) == 0:
+                continue
+
+            if not check_info(self, titleObj.info):
+                return
+
+            titles[titleObj.titleID] = titleObj.info
+
+        return titles
 
     def selectTitle(self, obj, col):
         """

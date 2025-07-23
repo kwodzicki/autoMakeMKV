@@ -53,6 +53,7 @@ class DevToMount(QtCore.QThread):
 
         self.dev = dev
         self.root = root
+        self.uname = os.getlogin()
 
     def run(self):
         mnt = self.get_mount()
@@ -65,34 +66,49 @@ class DevToMount(QtCore.QThread):
         if sys.platform.startswith('win'):
             return self.dev
 
-        uname = os.getlogin()
         t0 = time.monotonic()
         t1 = t0 + TIMEOUT
 
         # While we have not timed out
-        while t0 < t1:
-            # Iterate over all items in the root dir
-            for item in os.listdir(self.root):
-                # Get the real path of the item
-                path = os.path.realpath(os.path.join(self.root, item))
-                if path != self.dev:
-                    continue
-
-                # We try 2 different item values; original and escaped
-                for i in range(2):
-                    if i == 1:  # If second loop, then escape the string
-                        item = item.encode().decode('unicode_escape')
-                    # Build full path to what should be mount path
-                    path = os.path.join('/media', uname, item)
-                    try:
-                        _ = os.listdir(path)
-                    except Exception:
-                        pass
-                    else:
-                        return path
+        while time.monotonic() < t1:
+            path = self.iter_items()
+            if path is not None:
+                return path
 
             time.sleep(3.0)
-            t0 = time.monotonic()
+
+        return None
+
+    def iter_items(self) -> str | None:
+
+        # Iterate over all items in the root dir
+        try:
+            items = os.listdir(self.root)
+        except Exception:
+            return None
+
+        for item in items:
+            # Get the real path of the item
+            try:
+                path = os.path.realpath(os.path.join(self.root, item))
+            except Exception:
+                continue
+
+            if path != self.dev:
+                continue
+
+            # We try 2 different item values; original and escaped
+            for i in range(2):
+                if i == 1:  # If second loop, then escape the string
+                    item = item.encode().decode('unicode_escape')
+                # Build full path to what should be mount path
+                path = os.path.join('/media', self.uname, item)
+                try:
+                    _ = os.listdir(path)
+                except Exception:
+                    pass
+                else:
+                    return path
 
         return None
 

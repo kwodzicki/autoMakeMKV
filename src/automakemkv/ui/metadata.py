@@ -30,6 +30,8 @@ class DiscMetadataEditor(dialogs.MyQDialog):
         hashid: str,
         dbdir: str,
         *args,
+        discInfo: dict | None = None,
+        titles: dict | None = None,
         load_existing: bool = False,
         backed_up: bool = False,
         **kwargs,
@@ -41,10 +43,15 @@ class DiscMetadataEditor(dialogs.MyQDialog):
         self.curTitle = None
         self.discLabel = None
         self.info = None
+        self.loadDisc = None
+        self._discInfo = discInfo or dict()
+        self._titles = titles or dict()
 
         self.dev = dev
         self.hashid = hashid
         self.dbdir = dbdir
+        self.load_existing = load_existing
+
         self.vendor, self.model = utils.get_vendor_model(dev)
         self.setWindowTitle()
 
@@ -100,33 +107,24 @@ class DiscMetadataEditor(dialogs.MyQDialog):
         self.setLayout(layout)
         self.resize(720, 720)
 
-        self.loadDisc = makemkv.MakeMKVInfo(
-            dev,
-            self.hashid,
-            dbdir=self.dbdir,
-        )
-        self.loadDisc.FAILURE.connect(self.load_failed)
-        self.loadDisc.SIGNAL.connect(self.msgs.append)
-        self.loadDisc.finished.connect(self.buildTitleTree)
-
-        if load_existing:
-            self.log.info("Loading existing information")
-            path = utils.file_from_id(self.hashid, dbdir=self.dbdir)
-            self.loadDisc.loadFile(json=path)
-            self.buildTitleTree(
-                info=utils.load_metadata(
-                    self.dev,
-                    hashid=self.hashid,
-                    dbdir=self.dbdir,
-                )
+        if len(self.discInfo) == 0 or len(self.titles) == 0:
+            self.loadDisc = makemkv.MakeMKVInfo(
+                dev,
+                self.hashid,
+                dbdir=self.dbdir,
             )
-        elif dev != '':
+            self.loadDisc.FAILURE.connect(self.load_failed)
+            self.loadDisc.SIGNAL.connect(self.msgs.append)
+            self.loadDisc.finished.connect(self.buildTitleTree)
+
             self.log.info("Loading new disc")
             self.loadDisc.start()
             self.loadDisc.started.wait()
             # Update process to read from in the progress widget
             # self.progress.new_process(self.loadDisc.proc)
             self.progress.NEW_PROCESS.emit(self.loadDisc.proc, 'stderr')
+        else:
+            self.buildTitleTree()
 
         self.show()
 
@@ -137,18 +135,27 @@ class DiscMetadataEditor(dialogs.MyQDialog):
 
         file_menu = menu_bar.addMenu("File")
 
-        action_open = QtWidgets.QAction("&Open...", self)
-        action_open.triggered.connect(self.open)
         action_save = QtWidgets.QAction("&Save", self)
         action_save.triggered.connect(self.save)
         action_quit = QtWidgets.QAction("&Cancel", self)
         action_quit.triggered.connect(self.quit)
 
-        file_menu.addAction(action_open)
         file_menu.addAction(action_save)
         file_menu.addSeparator()
         file_menu.addAction(action_quit)
         return menu_bar
+
+    @QtCore.pyqtProperty(dict)
+    def discInfo(self) -> dict:
+        if self.loadDisc is None:
+            return self._discInfo
+        return self.loadDisc.discInfo
+
+    @QtCore.pyqtProperty(dict)
+    def titles(self) -> dict:
+        if self.loadDisc is None:
+            return self._titles
+        return self.loadDisc.titles
 
     @QtCore.pyqtSlot(str)
     def load_failed(self, device: str):
@@ -157,7 +164,8 @@ class DiscMetadataEditor(dialogs.MyQDialog):
         dialog.exec_()
 
     def quit(self, *args, **kwargs):
-        self.loadDisc.quit()
+        if self.loadDisc:
+            self.loadDisc.quit()
         self.accept()
 
     def setWindowTitle(self):
@@ -168,28 +176,6 @@ class DiscMetadataEditor(dialogs.MyQDialog):
         if self.discLabel:
             title = f"{title} - {self.discLabel}"
         super().setWindowTitle(title)
-
-    def open(self, *args, **kwargs):
-
-        self.log.debug('Attempting to open disc JSON for editing')
-        dialog = QtWidgets.QFileDialog(directory=self.dbdir)
-        dialog.setDefaultSuffix('json')
-        dialog.setNameFilters(['JSON (*.json)'])
-        if dialog.exec_() != QtWidgets.QDialog.Accepted:
-            return
-
-        files = dialog.selectedFiles()
-        if len(files) != 1:
-            box = QtWidgets.QMessageBox(self)
-            box.setText('Can only select one (1) file')
-            box.exec_()
-            return
-
-        self.msgs.clear()
-        self.loadDisc.loadFile(json=files[0])
-        self.buildTitleTree(
-            info=utils.load_metadata(self.dev, fpath=files[0])
-        )
 
     def save(self, *args, **kwargs):
         """
@@ -366,9 +352,17 @@ class DiscMetadataEditor(dialogs.MyQDialog):
             self.progress = None
 
         self.titleTree.clear()
-        discInfo = self.loadDisc.discInfo
-        titles = self.loadDisc.titles
+        discInfo = self.discInfo
+        titles = self.titles
         infoTitles = {}
+
+        if self.load_existing:
+            info = utils.load_metadata(
+                self.dev,
+                hashid=self.hashid,
+                dbdir=self.dbdir,
+            )
+
         if info is not None:
             self.hashid = info.get('hashID', self.hashid)
             self.discMetadata.setInfo(info)

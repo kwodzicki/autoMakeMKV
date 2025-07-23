@@ -98,6 +98,8 @@ class DiscHandler(QtCore.QObject):
         self.extractor = None
 
         self.info = None
+        self.discInfo = None
+        self.titles = None
 
         # To handle windows mount points, use drive split. Will be
         # empty on linux/mac. Append monotonic time to directory to
@@ -286,6 +288,9 @@ class DiscHandler(QtCore.QObject):
         if self.metadata is not None:
             self.log.debug("%s - Cleaning up the metadata window", self.dev)
             self.info = self.metadata.info
+            self.discInfo = self.metadata.discInfo
+            self.titles = self.metadata.titles
+
             self.metadata.deleteLater()
             self.metadata = None
 
@@ -385,6 +390,8 @@ class DiscHandler(QtCore.QObject):
             self.dev,
             self.hashid,
             SETTINGS.dbdir,
+            discInfo=self.discInfo,
+            titles=self.titles,
             load_existing=True,
             backed_up=True,
         )

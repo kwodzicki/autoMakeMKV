@@ -38,7 +38,13 @@ class Settings(QtCore.QObject):
 
         self._log = logging.getLogger(__name__)
         self._lock = Lock()
-        self._settings = {}
+        self._settings = {
+            'outdir': videodir,
+            'dbdir': dbdir,
+            'everything': False,
+            'extras': False,
+            'convention': 'plex',
+        }
 
         self._name = name
         self._settings_file = settings_file
@@ -49,9 +55,6 @@ class Settings(QtCore.QObject):
 
         # Use signal/slot os that dialog is in main thread
         self.REMOTE_DIALOG.connect(self._remote_dialog)
-
-        self.dbdir = dbdir
-        self.outdir = videodir
 
     def __repr__(self) -> str:
         return str(self._settings)

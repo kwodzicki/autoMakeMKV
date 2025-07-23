@@ -388,9 +388,6 @@ class MakeMKVInfo(MakeMKVThread):
 
         """
 
-        if self.info_path is None:
-            return
-
         # Start scanning disc
         self.makemkvcon()
 

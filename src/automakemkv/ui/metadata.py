@@ -30,6 +30,8 @@ class DiscMetadataEditor(dialogs.MyQDialog):
         hashid: str,
         dbdir: str,
         *args,
+        discInfo: dict | None = None,
+        titles: dict | None = None,
         load_existing: bool = False,
         backed_up: bool = False,
         **kwargs,
@@ -41,6 +43,9 @@ class DiscMetadataEditor(dialogs.MyQDialog):
         self.curTitle = None
         self.discLabel = None
         self.info = None
+        self.loadDisc = None
+        self._discInfo = discInfo or dict()
+        self._titles = titles or dict()
 
         self.dev = dev
         self.hashid = hashid
@@ -102,22 +107,24 @@ class DiscMetadataEditor(dialogs.MyQDialog):
         self.setLayout(layout)
         self.resize(720, 720)
 
-        self.loadDisc = makemkv.MakeMKVInfo(
-            dev,
-            self.hashid,
-            dbdir=self.dbdir,
-        )
-        self.loadDisc.FAILURE.connect(self.load_failed)
-        self.loadDisc.SIGNAL.connect(self.msgs.append)
-        self.loadDisc.finished.connect(self.buildTitleTree)
+        if len(self.discInfo) == 0 or len(self.titles) == 0:
+            self.loadDisc = makemkv.MakeMKVInfo(
+                dev,
+                self.hashid,
+                dbdir=self.dbdir,
+            )
+            self.loadDisc.FAILURE.connect(self.load_failed)
+            self.loadDisc.SIGNAL.connect(self.msgs.append)
+            self.loadDisc.finished.connect(self.buildTitleTree)
 
-        if dev != '':
             self.log.info("Loading new disc")
             self.loadDisc.start()
             self.loadDisc.started.wait()
             # Update process to read from in the progress widget
             # self.progress.new_process(self.loadDisc.proc)
             self.progress.NEW_PROCESS.emit(self.loadDisc.proc, 'stderr')
+        else:
+            self.buildTitleTree()
 
         self.show()
 
@@ -138,6 +145,18 @@ class DiscMetadataEditor(dialogs.MyQDialog):
         file_menu.addAction(action_quit)
         return menu_bar
 
+    @QtCore.pyqtProperty(dict)
+    def discInfo(self) -> dict:
+        if self.loadDisc is None:
+            return self._discInfo
+        return self.loadDisc.discInfo
+
+    @QtCore.pyqtProperty(dict)
+    def titles(self) -> dict:
+        if self.loadDisc is None:
+            return self._titles
+        return self.loadDisc.titles
+
     @QtCore.pyqtSlot(str)
     def load_failed(self, device: str):
 
@@ -145,7 +164,8 @@ class DiscMetadataEditor(dialogs.MyQDialog):
         dialog.exec_()
 
     def quit(self, *args, **kwargs):
-        self.loadDisc.quit()
+        if self.loadDisc:
+            self.loadDisc.quit()
         self.accept()
 
     def setWindowTitle(self):
@@ -332,8 +352,8 @@ class DiscMetadataEditor(dialogs.MyQDialog):
             self.progress = None
 
         self.titleTree.clear()
-        discInfo = self.loadDisc.discInfo
-        titles = self.loadDisc.titles
+        discInfo = self.discInfo
+        titles = self.titles
         infoTitles = {}
 
         if self.load_existing:

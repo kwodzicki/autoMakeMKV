@@ -1,7 +1,6 @@
 import logging
 import os
 import sys
-import shutil
 import re
 import json
 
@@ -12,7 +11,6 @@ if sys.platform.startswith('win'):
 from .. import DBDIR
 
 EXT = '.json'
-INFO_EXT = '.info.gz'
 
 TRACKSIZE_AP = 11  # Number used for track size in TINFO from MakeMKV
 TRACKSIZE_REG = re.compile(
@@ -68,9 +66,6 @@ def db_migrate(
         return new_path
 
     log.debug("%s - Migrating data: %s --> %s", dev, old_path, new_path)
-    old_infopath = os.path.splitext(old_path)[0] + INFO_EXT
-    new_infopath = os.path.splitext(new_path)[0] + INFO_EXT
-    shutil.copy(old_infopath, new_infopath)
 
     # Read in old json file
     with open(old_path, mode='r') as iid:

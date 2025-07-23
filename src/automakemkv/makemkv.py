@@ -4,9 +4,7 @@ Utilities for running MakeMKV
 """
 
 import logging
-import os
 import re
-import gzip
 
 from threading import Event
 from subprocess import (
@@ -19,7 +17,7 @@ from subprocess import (
 
 from PyQt5 import QtCore
 
-from . import DBDIR, MAKEMKVCON
+from . import MAKEMKVCON
 from .mkv_lookup import AP
 
 DEVICE_MSG = 'DRV:'
@@ -245,14 +243,6 @@ class MakeMKVThread(QtCore.QThread):
                     val = str(val).lower()
                 opts.append(f"--{key}={val}")
 
-        # if self.command not in COMMANDS:
-        #     self.log.error(
-        #         "%s - Unsupported command : '%s'",
-        #         self.source[1],
-        #         self.command,
-        #     )
-        #     return
-
         cmd = [
             MAKEMKVCON,
             *opts,
@@ -379,10 +369,6 @@ class MakeMKVInfo(MakeMKVThread):
 
         self.dev = dev
         self.discid = discid
-        self.info_path = os.path.join(
-            dbdir or DBDIR,
-            f"{discid}.info.gz",
-        )
 
         self.discInfo = {}
         self.titles = {}
@@ -409,33 +395,12 @@ class MakeMKVInfo(MakeMKVThread):
         self.makemkvcon()
 
         self.log.debug("%s - Streaming data from stdout", self.dev)
-        # Open gzip file for storing robot output and write MakeMKV
-        # output to file
-        with gzip.open(self.info_path, 'wt') as fid:
-            for line in iter(self.stdout.readline, ''):
-                fid.write(
-                    sanitize(line)
-                )
-                self.parse_line(line)
-                self.check_result(line)
+        for line in iter(self.stdout.readline, ''):
+            self.parse_line(line)
+            self.check_result(line)
+
         self.proc.wait()
         self.proc.communicate()
-
-    def loadFile(self, json: str | None = None) -> None:
-        """
-        Load stored MakeMKV robot output
-
-        """
-
-        self.titles = {}
-        if json is None:
-            fpath = self.info_path
-        else:
-            fpath = os.path.splitext(json)[0]+'.info.gz'
-
-        with gzip.open(fpath, 'rt') as iid:
-            for line in iid.readlines():
-                self.parse_line(line)
 
     def parse_line(self, line: str) -> None:
         """Parse lines from makemkvcon"""
@@ -471,47 +436,6 @@ class MakeMKVInfo(MakeMKVThread):
                 tt[stream] = {}
             if sid in AP:
                 tt[stream][AP[sid]] = val.strip('"')
-
-
-def sanitize(line: str) -> str:
-    """
-    Mask out sensitive information
-
-    Masks out sensitive info in DRV messages and MSG 1004, 2003, 3338
-    from MakeMKV.
-
-    Issue #30 from TheDiscDb
-
-    Arguments:
-        line (str): Line from MakeMKV logs
-
-    Returns:
-        str: Sanititzed line from MakeMKV logs
-
-    """
-
-    if line.startswith(SANITIZE):
-        return re.sub('"[^"]*"', '"***"', line)
-
-    return line
-
-
-def sanitize_database_file(path: str):
-    """
-    path (str): Path to database file to sanitize
-
-    """
-
-    # Read in all the data
-    with gzip.open(path, mode='rt') as iid:
-        lines = iid.readlines()
-
-    # Write out sanitized data
-    with gzip.open(path, mode='wt') as oid:
-        for line in lines:
-            oid.write(
-                sanitize(line)
-            )
 
 
 def _dev_to_disc(timeout: float | int = 60.0) -> dict:

@@ -45,6 +45,8 @@ class DiscMetadataEditor(dialogs.MyQDialog):
         self.dev = dev
         self.hashid = hashid
         self.dbdir = dbdir
+        self.load_existing = load_existing
+
         self.vendor, self.model = utils.get_vendor_model(dev)
         self.setWindowTitle()
 
@@ -109,18 +111,7 @@ class DiscMetadataEditor(dialogs.MyQDialog):
         self.loadDisc.SIGNAL.connect(self.msgs.append)
         self.loadDisc.finished.connect(self.buildTitleTree)
 
-        if load_existing:
-            self.log.info("Loading existing information")
-            path = utils.file_from_id(self.hashid, dbdir=self.dbdir)
-            self.loadDisc.loadFile(json=path)
-            self.buildTitleTree(
-                info=utils.load_metadata(
-                    self.dev,
-                    hashid=self.hashid,
-                    dbdir=self.dbdir,
-                )
-            )
-        elif dev != '':
+        if dev != '':
             self.log.info("Loading new disc")
             self.loadDisc.start()
             self.loadDisc.started.wait()
@@ -137,14 +128,11 @@ class DiscMetadataEditor(dialogs.MyQDialog):
 
         file_menu = menu_bar.addMenu("File")
 
-        action_open = QtWidgets.QAction("&Open...", self)
-        action_open.triggered.connect(self.open)
         action_save = QtWidgets.QAction("&Save", self)
         action_save.triggered.connect(self.save)
         action_quit = QtWidgets.QAction("&Cancel", self)
         action_quit.triggered.connect(self.quit)
 
-        file_menu.addAction(action_open)
         file_menu.addAction(action_save)
         file_menu.addSeparator()
         file_menu.addAction(action_quit)
@@ -168,28 +156,6 @@ class DiscMetadataEditor(dialogs.MyQDialog):
         if self.discLabel:
             title = f"{title} - {self.discLabel}"
         super().setWindowTitle(title)
-
-    def open(self, *args, **kwargs):
-
-        self.log.debug('Attempting to open disc JSON for editing')
-        dialog = QtWidgets.QFileDialog(directory=self.dbdir)
-        dialog.setDefaultSuffix('json')
-        dialog.setNameFilters(['JSON (*.json)'])
-        if dialog.exec_() != QtWidgets.QDialog.Accepted:
-            return
-
-        files = dialog.selectedFiles()
-        if len(files) != 1:
-            box = QtWidgets.QMessageBox(self)
-            box.setText('Can only select one (1) file')
-            box.exec_()
-            return
-
-        self.msgs.clear()
-        self.loadDisc.loadFile(json=files[0])
-        self.buildTitleTree(
-            info=utils.load_metadata(self.dev, fpath=files[0])
-        )
 
     def save(self, *args, **kwargs):
         """
@@ -369,6 +335,14 @@ class DiscMetadataEditor(dialogs.MyQDialog):
         discInfo = self.loadDisc.discInfo
         titles = self.loadDisc.titles
         infoTitles = {}
+
+        if self.load_existing:
+            info = utils.load_metadata(
+                self.dev,
+                hashid=self.hashid,
+                dbdir=self.dbdir,
+            )
+
         if info is not None:
             self.hashid = info.get('hashID', self.hashid)
             self.discMetadata.setInfo(info)

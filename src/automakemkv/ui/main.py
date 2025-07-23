@@ -49,9 +49,9 @@ class SystemTray(QtWidgets.QSystemTrayIcon):
         self._settings.triggered.connect(self.settings_widget)
         self._menu.addAction(self._settings)
 
-        self._metadata = QtWidgets.QAction('Metadata Editor')
-        self._metadata.triggered.connect(self.metadata_widget)
-        self._menu.addAction(self._metadata)
+        # self._metadata = QtWidgets.QAction('Metadata Editor')
+        # self._metadata.triggered.connect(self.metadata_widget)
+        # self._menu.addAction(self._metadata)
 
         self._menu.addSeparator()
 

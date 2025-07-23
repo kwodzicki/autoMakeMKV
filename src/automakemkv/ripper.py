@@ -5,12 +5,15 @@ Utilities for ripping titles
 
 import logging
 import os
+import time
 import copy
 import shutil
 import subprocess
+from threading import Event
 
 from PyQt5 import QtCore
 
+from . import SETTINGS
 from . import MKVMERGE
 from . import utils
 from . import disc_hash
@@ -25,6 +28,8 @@ PLAYLIST_EXT = '.mpls'
 STREAM_DIR = ('BDMV', 'STREAM')
 STREAM_EXT = '.m2ts'
 BACKUP_FILE = 'image.iso'
+BUFFER_SIZE = 2**20 * 25
+
 MAKEMKV_SETTINGS = utils.load_makemkv_settings()
 
 
@@ -47,30 +52,17 @@ class DiscHandler(QtCore.QObject):
     def __init__(
         self,
         dev: str,
-        outdir: str,
-        everything: bool,
-        extras: bool,
-        convention: str,
-        dbdir: str,
         root: str,
         progress,
+        cleanup: bool = True,
         **kwargs,
     ):
         """
         Arguments:
             dev (str): Dev device
-            outdir (str) : Top-level directory for ripping files
-            everything (bool) : If set, then all titles identified
-                for ripping will be ripped. By default, only the
-                main feature will be ripped
-            extras (bool) : If set, only 'extra' features will
-                be ripped along with the main title(s). Main
-                title(s) include Theatrical/Extended/etc.
-                versions for movies, and episodes for series.
             root (str) : Location of the 'by-uuid' directory
                 where discs are mounted. This is used to
                 get the unique ID of the disc.
-            convention (str) : Output naming convention to use for
 
         """
 
@@ -80,24 +72,24 @@ class DiscHandler(QtCore.QObject):
         self.DISC_METADATA_DIALOG.connect(self.disc_metadata_dialog)
         self.EXTRACT_TITLE.connect(self.extract_title)
 
+        self._backup = False
         self._cancelled = False
         self._delay_eject = False  # used during backup then tag
 
-        self.cleanup = True
+        self._paths = {}
+        self._npaths = 0
+        self._nfail = 0
 
+        self.is_bluray = False
         self.backup_path = None
         self.mnt = None
-        self.paths = {}
 
         self.dev = dev
-        self.outdir = outdir
-        self.everything = everything
-        self.extras = extras
-        self.dbdir = dbdir
         self.root = root
-        self.convention = convention
         self.progress = progress
         self.progress.CANCEL.connect(self.cancel)
+
+        self.cleanup = cleanup
 
         self.disc_hasher = None
         self.options = None
@@ -112,10 +104,14 @@ class DiscHandler(QtCore.QObject):
         # help ensure not collisions
         drive, tail = os.path.splitdrive(dev)
         if drive == '':
-            tmpdir = os.path.basename(dev)
+            tmppath = os.path.basename(dev)
         else:
-            tmpdir = drive.rstrip(":") + "_drive"
-        self._tmpdir = os.path.join(outdir, tmpdir)
+            tmppath = drive.rstrip(":") + "_drive"
+
+        self._tmpdir = {
+            'extract': os.path.join(SETTINGS.outdir, tmppath),
+            'backup': os.path.join(SETTINGS.tmpdir, tmppath),
+        }
 
         self.hashid = None
         self.discid = utils.get_discid(dev, root)  # This is pretty quick
@@ -127,14 +123,29 @@ class DiscHandler(QtCore.QObject):
         self.dev_to_mnt.start()
 
     @property
+    def paths(self) -> dict:
+        return self._paths
+
+    @paths.setter
+    def paths(self, val):
+        self._paths = val
+        self._npaths = len(val)
+
+    @property
     def hash(self) -> str | None:
         return self.hashid or self.discid
 
     @property
     def tmpdir(self) -> str:
+        tmpdir = (
+            self._tmpdir['backup']
+            if self._backup and self.is_bluray else
+            self._tmpdir['extract']
+        )
+
         if self.hash is None:
-            return self._tmpdir
-        return f"{self._tmpdir}_{self.hash}"
+            return tmpdir
+        return f"{tmpdir}_{self.hash}"
 
     def isRunning(self):
         """
@@ -219,8 +230,8 @@ class DiscHandler(QtCore.QObject):
         self.disc_hasher.FINISHED.connect(self.disc_lookup)
         self.disc_hasher.start()
 
-    @QtCore.pyqtSlot(str)
-    def disc_lookup(self, hashid: str):
+    @QtCore.pyqtSlot(str, bool)
+    def disc_lookup(self, hashid: str, is_bluray: bool):
         """
         Get information about a disc
 
@@ -236,6 +247,7 @@ class DiscHandler(QtCore.QObject):
             self.disc_hasher.wait()  # Should be quick
             self.disc_hasher.deleteLater()
 
+        self.is_bluray = is_bluray
         # If hash is an emtpy string, then ensure that attribute is None
         self.hashid = hashid if hashid != '' else None
 
@@ -254,7 +266,7 @@ class DiscHandler(QtCore.QObject):
             self.dev,
             discid=self.discid,
             hashid=self.hashid,
-            dbdir=self.dbdir,
+            dbdir=SETTINGS.dbdir,
         )
 
         # Open dics metadata GUI and register "callback" for when closes
@@ -297,6 +309,7 @@ class DiscHandler(QtCore.QObject):
 
         # If we want to backup, then reopen metadata for tagging
         if result == metadata.BACKUP_THEN_TAG:
+            self._backup = True
             output = os.path.join(self.tmpdir, BACKUP_FILE)
             if self.use_existing_backup(output):
                 # If using existing, then call method and then return
@@ -334,9 +347,9 @@ class DiscHandler(QtCore.QObject):
         self.options = metadata.ExistingDiscOptions(
             self.dev,
             self.info,
-            self.convention,
-            self.extras,
-            self.everything,
+            SETTINGS.convention,
+            SETTINGS.extras,
+            SETTINGS.everything,
         )
         self.options.FINISHED.connect(self.handle_metadata)
 
@@ -347,7 +360,7 @@ class DiscHandler(QtCore.QObject):
         self.metadata = metadata.DiscMetadataEditor(
             self.dev,
             self.hashid,
-            self.dbdir,
+            SETTINGS.dbdir,
             load_existing=load_existing,
         )
         self.metadata.FINISHED.connect(self.existing_disc)
@@ -371,7 +384,7 @@ class DiscHandler(QtCore.QObject):
         self.metadata = metadata.DiscMetadataEditor(
             self.dev,
             self.hashid,
-            self.dbdir,
+            SETTINGS.dbdir,
             load_existing=True,
             backed_up=True,
         )
@@ -444,15 +457,13 @@ class DiscHandler(QtCore.QObject):
         }
 
         # Get all paths to output files created during rip
-        self.paths.update(
-            dict(
-                path_utils.outfile(
-                    self.outdir,
-                    info,
-                    everything=True,
-                    extras=False,
-                    convention=convention,
-                )
+        self.paths = dict(
+            path_utils.outfile(
+                SETTINGS.outdir,
+                info,
+                everything=True,
+                extras=False,
+                convention=convention,
             )
         )
 
@@ -468,6 +479,8 @@ class DiscHandler(QtCore.QObject):
             self.rip_finished(self.backup_path)
             return
 
+        self._backup = len(self.paths) > 1
+
         self.log.debug(
             "%s - Creating temporary directory : '%s'",
             self.dev,
@@ -478,7 +491,7 @@ class DiscHandler(QtCore.QObject):
         # Set up ripper based on single or multi-title rip
         # The FINISHED signal processing is specific to type
         # of rip
-        if len(self.paths) == 1:
+        if not self._backup:
             title, output = list(self.paths.items())[0]
             self.ripper = RipTitle(
                 self.dev,
@@ -492,6 +505,7 @@ class DiscHandler(QtCore.QObject):
             output = os.path.join(self.tmpdir, BACKUP_FILE)
             if self.use_existing_backup(output):
                 # If using existing, then call method and then return
+                self.EJECT_DISC.emit()
                 self.rip_finished(output)
                 return
 
@@ -586,6 +600,9 @@ class DiscHandler(QtCore.QObject):
             self.extractor.wait()
             self.extractor.deleteLater()
 
+        if previous_output != '':
+            self._nfail += not os.path.exists(previous_output)
+
         # If there are still titles to extract (paths left) AND we have
         # not had a cancel event
         if len(self.paths) > 0 and not self._cancelled:
@@ -616,7 +633,13 @@ class DiscHandler(QtCore.QObject):
         self.extractor = None
         self.progress.MKV_REMOVE_DISC.emit(self.backup_path)
 
-        if self.cleanup:
+        if self._nfail > 0:
+            self.log.warning(
+                "%s - Extraction(s) failed, leaving temporary directory: %s",
+                self.dev,
+                self.tmpdir,
+            )
+        elif self.cleanup:
             # Attempt to remove the backup (tmp) file
             self.log.debug(
                 "%s - Removing temporary directory: %s",
@@ -1032,6 +1055,7 @@ class ExtractFromBluRay(QtCore.QThread):
     """
 
     FAILURE = QtCore.pyqtSignal(str)
+    CANCEL = QtCore.pyqtSignal()
     SUCCESS = QtCore.pyqtSignal(str)
     FINISHED = QtCore.pyqtSignal(str)
 
@@ -1062,7 +1086,11 @@ class ExtractFromBluRay(QtCore.QThread):
         super().__init__()
 
         self.log = logging.getLogger(__name__)
+        self._running = Event()
+        self._running.set()
+
         self._result = None
+        self.proc = None
 
         self.src = src
         self.paths = paths
@@ -1070,9 +1098,20 @@ class ExtractFromBluRay(QtCore.QThread):
         self.progress = progress
         self.title = tuple(self.paths.keys())[0]
 
+        self.CANCEL.connect(self.cancel)
+
     @property
     def result(self):
         return self._result
+
+    @QtCore.pyqtSlot()
+    def cancel(self):
+        """Kill the MakeMKV Process"""
+        self.log.info('%s - Cancel request', self.src)
+        self._running.clear()
+        if self.proc:
+            self.log.info('%s - Killing process', self.src)
+            self.proc.kill()
 
     def run(self):
         """Run thread"""
@@ -1141,8 +1180,10 @@ class ExtractFromBluRay(QtCore.QThread):
             )
             return False
 
+        outtmp, _ = os.path.splitext(self.src)
+        outtmp = f"{outtmp}.mkv"
         # Build mkvmerge command to run
-        cmd = [MKVMERGE, '-o', output]
+        cmd = [MKVMERGE, '-o', outtmp]
         if lang is not None:
             cmd.extend(lang_opts)
         cmd.append(title_src)
@@ -1157,9 +1198,63 @@ class ExtractFromBluRay(QtCore.QThread):
         # Set current track on progress
         self.progress.MKV_CUR_TRACK.emit(self.src, self.title)
         self.progress.MKV_NEW_PROCESS.emit(self.src, self.proc, 'stdout')
+
+        # A sleep to wait for signals to be set up
+        time.sleep(0.5)
+
+        # Set the track progress title (PRGC) and the overall progress
+        # title (PRGT); codes are from MakeMKV
+        self.progress.MKV_PROGRESS_TITLE.emit(
+            self.src, 'PRGC', 'Extracting title',
+        )
+        self.progress.MKV_PROGRESS_TITLE.emit(
+            self.src, 'PRGT', 'Progress',
+        )
+
+        # Wait for process (mkvmerge) to finish
         self.proc.wait()
 
         if self.proc.returncode != 0:
+            try:
+                os.remove(outtmp)  # Delete the file on failure
+            except Exception:
+                pass
+            self.FAILURE.emit(output)
+            return False
+
+        # Update the track proress title
+        self.progress.MKV_PROGRESS_TITLE.emit(self.src, 'PRGC', 'Moving file')
+
+        # File move with progress
+        total_size = os.path.getsize(outtmp)
+        copied = 0
+        with open(outtmp, mode='rb') as src, open(output, mode='wb') as dst:
+            while self._running.is_set():
+                chunk = src.read(BUFFER_SIZE)
+                if not chunk:
+                    break
+                copied += dst.write(chunk)
+
+                # Compute copied percentage
+                percent = (copied / total_size) * 100
+                # Update the progress bars; note that overall progress is
+                # half of copy progress + 50 as the MKVMERGE was the first
+                # 50% of progress
+                self.progress.MKV_PROGRESS_VALUE.emit(
+                    self.src,
+                    int(percent),
+                    int(percent / 2) + 50,
+                    100,
+                )
+        os.remove(outtmp)
+
+        # Check for running; will not be set if ripper cancelled
+        if not self._running.is_set():
+            try:
+                os.remove(output)  # Delete the file on failure
+            except Exception:
+                pass
+
             self.FAILURE.emit(output)
             return False
 

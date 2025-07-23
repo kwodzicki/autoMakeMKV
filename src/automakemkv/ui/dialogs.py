@@ -3,9 +3,8 @@ import os
 from PyQt5 import QtWidgets
 from PyQt5 import QtCore
 
-from .. import NAME
+from .. import NAME, SETTINGS
 from ..path_utils import CONVENTIONS
-from . import utils
 from . import widgets
 
 
@@ -173,6 +172,14 @@ class MyQDialog(QtWidgets.QDialog):
         self.stop_timer()
         self.done(self.timeout_code)
 
+    def keyPressEvent(self, event):
+        """Overload key press to ignore escape key"""
+
+        if event.key() == QtCore.Qt.Key_Escape:
+            return
+
+        super().keyPressEvent(event)
+
     def done(self, arg):
 
         super().done(arg)
@@ -288,13 +295,9 @@ class SettingsDialog(QtWidgets.QDialog):
 
         self.setLayout(layout)
 
-        self.set_settings()
-
-    def set_settings(self):
-        self.widget.set_settings()
-
-    def get_settings(self):
-        return self.widget.get_settings()
+    @property
+    def changed(self) -> bool:
+        return self.widget.changed
 
 
 class SettingsWidget(QtWidgets.QWidget):
@@ -302,8 +305,18 @@ class SettingsWidget(QtWidgets.QWidget):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
-        self.dbdir = widgets.PathSelector('Database Location:')
+        self.changed = False
+
         self.outdir = widgets.PathSelector('Output Location:')
+        self.dbdir = widgets.PathSelector('Database Location:')
+
+        self.outdir.setToolTip(
+            "Sets the directory/folder where titles are extracted to"
+        )
+
+        self.dbdir.setToolTip(
+            "Sets the directory/folder where database JSON files are located"
+        )
 
         self.convention_label = QtWidgets.QLabel('Output naming convention')
         self.convention = QtWidgets.QComboBox()
@@ -322,43 +335,55 @@ class SettingsWidget(QtWidgets.QWidget):
         radio_widget = QtWidgets.QWidget()
         radio_widget.setLayout(radio_layout)
 
+        # Set default values
+        self.outdir.setText(SETTINGS.outdir)
+        self.dbdir.setText(SETTINGS.dbdir)
+        self.features.setChecked(True)
+        self.everything.setChecked(SETTINGS.everything)
+        self.extras.setChecked(SETTINGS.extras)
+        idx = self.convention.findText(SETTINGS.convention)
+        if idx != -1:
+            self.convention.setCurrentIndex(idx)
+
+        # Connect changes
+        self.outdir.connectChanged(self.update_outdir)
+        self.dbdir.connectChanged(self.update_dbdir)
+        self.convention.currentTextChanged.connect(self.update_convention)
+        self.features.clicked.connect(self.update_titles)
+        self.extras.clicked.connect(self.update_titles)
+        self.everything.clicked.connect(self.update_titles)
+
         layout = QtWidgets.QVBoxLayout()
-        layout.addWidget(self.dbdir)
         layout.addWidget(self.outdir)
+        layout.addWidget(self.dbdir)
+        layout.addSpacerItem(
+            QtWidgets.QSpacerItem(40, 20)
+        )
         layout.addWidget(self.convention_label)
         layout.addWidget(self.convention)
         layout.addWidget(radio_widget)
         self.setLayout(layout)
 
-    def set_settings(self, settings: dict | None = None):
+    @QtCore.pyqtSlot(str)
+    def update_dbdir(self, val: str):
+        self.changed = True
+        SETTINGS.update(dbdir=val, no_save=True)
 
-        if settings is None:
-            settings = utils.load_settings()
+    @QtCore.pyqtSlot(str)
+    def update_outdir(self, val: str):
+        self.changed = True
+        SETTINGS.update(outdir=val, no_save=True)
 
-        self.features.setChecked(True)
-        if 'dbdir' in settings:
-            self.dbdir.setText(settings['dbdir'])
-        if 'outdir' in settings:
-            self.outdir.setText(settings['outdir'])
-        if 'everything' in settings:
-            self.everything.setChecked(settings['everything'])
-        if 'extras' in settings:
-            self.extras.setChecked(settings['extras'])
-        if 'convention' in settings:
-            idx = self.convention.findText(settings['convention'])
-            if idx != -1:
-                self.convention.setCurrentIndex(idx)
+    @QtCore.pyqtSlot(str)
+    def update_convention(self, val: str):
+        self.changed = True
+        SETTINGS.update(convention=val, no_save=True)
 
-    def get_settings(self, save: bool = True):
-
-        settings = {
-            'dbdir': self.dbdir.getText(),
-            'outdir': self.outdir.getText(),
-            'extras': self.extras.isChecked(),
-            'everything': self.everything.isChecked(),
-            'convention': self.convention.currentText(),
-        }
-        if save:
-            utils.save_settings(settings)
-
-        return settings
+    @QtCore.pyqtSlot(bool)
+    def update_titles(self, val: bool):
+        self.changed = True
+        SETTINGS.update(
+            extras=self.extras.isChecked(),
+            everything=self.everything.isChecked(),
+            no_save=True,
+        )

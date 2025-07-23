@@ -17,19 +17,20 @@ ATTEMPTS = 30
 
 class DiscHasher(QtCore.QThread):
 
-    FINISHED = QtCore.pyqtSignal(str)
+    FINISHED = QtCore.pyqtSignal(str, bool)
 
     def __init__(self, root: str | None):
         super().__init__()
 
         self.log = logging.getLogger(__name__)
         self.root = root
+        self.is_bluray = False
 
     def run(self):
         disc_hash = self.get_hash()
         if disc_hash is None:
             disc_hash = ''
-        self.FINISHED.emit(disc_hash)
+        self.FINISHED.emit(disc_hash, self.is_bluray)
 
     def get_hash(self) -> str | None:
 
@@ -42,6 +43,7 @@ class DiscHasher(QtCore.QThread):
 
         if os.path.isdir(bluray_dir):
             self.log.debug('%s - is bluray', self.root)
+            self.is_bluray = True
             path = bluray_dir
             ext = '.m2ts'
         elif os.path.isdir(dvd_dir):

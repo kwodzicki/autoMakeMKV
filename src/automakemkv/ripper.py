@@ -1155,6 +1155,11 @@ class ExtractFromBluRay(QtCore.QThread):
             )
             return
 
+        os.makedirs(
+            os.path.dirname(output),
+            exist_ok=True,
+        )
+
         # Try to get the source playlist/stream for the title
         title_src = (
             self

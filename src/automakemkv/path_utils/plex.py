@@ -76,7 +76,8 @@ def movie(
                 *replace_chars(*fpath),
             )
 
-        base = "{base} {edition-{{extraTitle}}}".format(base=base, **info)
+        extraTitle = 'edition-{extraTitle}'.format(**info)
+        base = f"{base} {{{extraTitle}}}"
     elif extras and not everything:
         return None
 

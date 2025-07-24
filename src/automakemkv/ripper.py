@@ -98,6 +98,8 @@ class DiscHandler(QtCore.QObject):
         self.extractor = None
 
         self.info = None
+        self.discInfo = None
+        self.titles = None
 
         # To handle windows mount points, use drive split. Will be
         # empty on linux/mac. Append monotonic time to directory to
@@ -286,6 +288,9 @@ class DiscHandler(QtCore.QObject):
         if self.metadata is not None:
             self.log.debug("%s - Cleaning up the metadata window", self.dev)
             self.info = self.metadata.info
+            self.discInfo = self.metadata.discInfo
+            self.titles = self.metadata.titles
+
             self.metadata.deleteLater()
             self.metadata = None
 
@@ -385,6 +390,8 @@ class DiscHandler(QtCore.QObject):
             self.dev,
             self.hashid,
             SETTINGS.dbdir,
+            discInfo=self.discInfo,
+            titles=self.titles,
             load_existing=True,
             backed_up=True,
         )
@@ -1148,6 +1155,12 @@ class ExtractFromBluRay(QtCore.QThread):
             )
             return
 
+        # Ensure directory for output file exists
+        os.makedirs(
+            os.path.dirname(output),
+            exist_ok=True,
+        )
+
         # Try to get the source playlist/stream for the title
         title_src = (
             self
@@ -1222,31 +1235,10 @@ class ExtractFromBluRay(QtCore.QThread):
             self.FAILURE.emit(output)
             return False
 
-        # Update the track proress title
-        self.progress.MKV_PROGRESS_TITLE.emit(self.src, 'PRGC', 'Moving file')
-
-        # File move with progress
-        total_size = os.path.getsize(outtmp)
-        copied = 0
-        with open(outtmp, mode='rb') as src, open(output, mode='wb') as dst:
-            while self._running.is_set():
-                chunk = src.read(BUFFER_SIZE)
-                if not chunk:
-                    break
-                copied += dst.write(chunk)
-
-                # Compute copied percentage
-                percent = (copied / total_size) * 100
-                # Update the progress bars; note that overall progress is
-                # half of copy progress + 50 as the MKVMERGE was the first
-                # 50% of progress
-                self.progress.MKV_PROGRESS_VALUE.emit(
-                    self.src,
-                    int(percent),
-                    int(percent / 2) + 50,
-                    100,
-                )
-        os.remove(outtmp)
+        if self.on_same_filesystem(outtmp, output):
+            self.move_file(outtmp, output)
+        else:
+            self.copy_file(outtmp, output)
 
         # Check for running; will not be set if ripper cancelled
         if not self._running.is_set():
@@ -1260,3 +1252,69 @@ class ExtractFromBluRay(QtCore.QThread):
 
         self.SUCCESS.emit(output)
         return True
+
+    def move_file(self, src_f: str, dst_f: str) -> None:
+        """
+        Move file instantly to new name
+
+        """
+
+        # Update the track proress title
+        self.progress.MKV_PROGRESS_TITLE.emit(
+            self.src,
+            'PRGC',
+            'Moving file...',
+        )
+        os.replace(src_f, dst_f)
+        self.progress.MKV_PROGRESS_VALUE.emit(self.src, 100, 100, 100)
+
+    def copy_file(self, src_f: str, dst_f: str) -> None:
+        """
+        Copy file, with progress, to new name
+
+        """
+
+        # Update the track proress title
+        self.progress.MKV_PROGRESS_TITLE.emit(
+            self.src,
+            'PRGC',
+            'Copying file...',
+        )
+
+        # File move with progress
+        total_size = os.path.getsize(src_f)
+        copied = 0
+        with open(src_f, mode='rb') as src, open(dst_f, mode='wb') as dst:
+            while self._running.is_set():
+                chunk = src.read(BUFFER_SIZE)
+                if not chunk:
+                    return
+                copied += dst.write(chunk)
+
+                # Compute copied percentage
+                percent = (copied / total_size) * 100
+                # Update the progress bars; note that overall progress is
+                # half of copy progress + 50 as the MKVMERGE was the first
+                # 50% of progress
+                self.progress.MKV_PROGRESS_VALUE.emit(
+                    self.src,
+                    int(percent),
+                    int(percent / 2) + 50,
+                    100,
+                )
+        os.remove(src_f)
+
+    @staticmethod
+    def on_same_filesystem(path1: str, path2: str) -> bool:
+        """
+        Return True if path1 and path2 are on the same filesystem.
+
+        """
+
+        if not os.path.exists(path1):
+            raise FileNotFoundError(f"{path1} does not exist")
+
+        if not os.path.exists(path2):
+            path2 = os.path.dirname(os.path.abspath(path2) or ".")
+
+        return os.stat(path1).st_dev == os.stat(path2).st_dev

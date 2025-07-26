@@ -295,7 +295,7 @@ class SettingsDialog(QtWidgets.QDialog):
 
         self.setLayout(layout)
 
-    @property
+    @QtCore.pyqtProperty(bool)
     def changed(self) -> bool:
         return self.widget.changed
 

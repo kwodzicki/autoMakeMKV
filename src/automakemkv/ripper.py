@@ -732,6 +732,12 @@ class RipTitle(makemkv.MakeMKVRip):
                 self.source[1],
                 err,
             )
+            self.FAILURE.emit(self.fname)
+        else:
+            if self._result is True:
+                self.SUCCESS.emit(self.fname)
+            elif self._result is False:
+                self.FAILURE.emit(self.fname)
         self.FINISHED.emit(self.fname)
 
     def rip(self):
@@ -762,7 +768,11 @@ class RipTitle(makemkv.MakeMKVRip):
 
         # If bad return code or failure
         if self.returncode != 0 or self.failure:
-            self.FAILURE.emit(self.fname)
+            self.log.error(
+                "%s - Error ripping track '%s'",
+                self.dev,
+                self.title,
+            )
             fdirs = []
             for fname in files:
                 fdir = os.path.dirname(fname)
@@ -776,15 +786,9 @@ class RipTitle(makemkv.MakeMKVRip):
                 else:
                     self.log.debug("%s - Removed dir: %s", self.dev, fdir)
 
-            self.log.error(
-                "Error ripping track '%s' from '%s'",
-                self.title,
-                self.dev,
-            )
             return False
 
         if len(files) == 0:
-            self.FAILURE.emit(self.fname)
             self.log.error(
                 "%s - Something went wrong, no output file found!",
                 self.dev,
@@ -792,13 +796,11 @@ class RipTitle(makemkv.MakeMKVRip):
             return False
 
         if len(files) > 1:
-            self.FAILURE.emit(self.fname)
             self.log.error("%s - Too many output files: %s", self.dev, files)
             for fname in files:
                 os.remove(fname)
             return False
 
-        self.SUCCESS.emit(self.fname)
         self.log.info(
             "%s - Renaming file '%s' ---> '%s'",
             self.dev,
@@ -866,10 +868,15 @@ class RipDisc(makemkv.MakeMKVRip):
                 self.source[1],
                 err,
             )
-
+            self.FAILURE.emit(self.output)
+        else:
+            if self._result is True:
+                self.SUCCESS.emit(self.output)
+            elif self._result is False:
+                self.FAILURE.emit(self.output)
         self.FINISHED.emit(self.output)
 
-    def rip(self):
+    def rip(self) -> bool:
         """
         Backup disc then extract titles
 
@@ -913,7 +920,6 @@ class RipDisc(makemkv.MakeMKVRip):
 
         # If bad return code or failure
         if self.returncode != 0 or self.failure:
-            self.FAILURE.emit(self.output)
             self.log.warning("%s - Error backing up disc", self.dev)
 
             try:
@@ -925,7 +931,6 @@ class RipDisc(makemkv.MakeMKVRip):
             self.log.debug("%s - Removed dir: %s", self.dev, self.output)
             return False
 
-        self.SUCCESS.emit(self.output)
         return True
 
 
@@ -963,23 +968,28 @@ class ExtractFromDVD(makemkv.MakeMKVRip):
     def run(self):
         """Run in thread"""
 
+        output = self.paths.pop(self.title)  # Remove reference to title here
         try:
-            self._result = self.extract()
+            self._result = self.extract(output)
         except Exception as err:
             self.log.exception(
                 "%s - Failed to rip title: %s",
                 self.source[1],
                 err,
             )
+            self.SUCCESS.emit(output)
+        else:
+            if self._result is True:
+                self.SUCCESS.emit(output)
+            elif self._result is False:
+                self.FAILURE.emit(output)
 
-        output = self.paths.pop(self.title)  # Remove reference to title here
         self.FINISHED.emit(output)
 
-    def extract(self):
+    def extract(self, output: str) -> bool | None:
         self.log.debug('%s - Running extract title', self.src)
 
         # Get output path for file
-        output = self.paths[self.title]
 
         if os.path.isfile(output):
             self.log.warning(
@@ -1014,7 +1024,6 @@ class ExtractFromDVD(makemkv.MakeMKVRip):
 
         # If there was an error during extration
         if self.returncode != 0 or self.failure:
-            self.FAILURE.emit(output)
             self.log.warning(
                 "%s - Failed to extract title %s from backup",
                 self.src,
@@ -1028,7 +1037,6 @@ class ExtractFromDVD(makemkv.MakeMKVRip):
 
         # If number of files found is different that one (1)
         if len(files) != 1:
-            self.FAILURE.emit(output)
             self.log.error("%s - Too many output files!", self.src)
             for fname in files:
                 os.remove(fname)
@@ -1049,8 +1057,6 @@ class ExtractFromDVD(makemkv.MakeMKVRip):
 
         # Rename the file
         os.rename(files[0], output)
-
-        self.SUCCESS.emit(output)
 
         return True
 
@@ -1123,19 +1129,25 @@ class ExtractFromBluRay(QtCore.QThread):
     def run(self):
         """Run thread"""
 
+        output = self.paths.pop(self.title)  # Remove reference to title here
         try:
-            self._result = self.extract()
+            self._result = self.extract(output)
         except Exception as err:
             self.log.exception(
                 "%s - Failed to rip title: %s",
                 self.src,
                 err,
             )
+            self.FAILURE.emit(output)
+        else:
+            if self._result is True:
+                self.SUCCESS.emit(output)
+            elif self._result is False:
+                self.FAILURE.emit(output)
 
-        output = self.paths.pop(self.title)  # Remove reference to title here
         self.FINISHED.emit(output)
 
-    def extract(self):
+    def extract(self, output: str) -> bool | None:
         # Try to get preferred language from MakeMKV settings and set
         # lang_opts if found
         lang = MAKEMKV_SETTINGS.get('app_PreferredLanguage', None)
@@ -1146,7 +1158,6 @@ class ExtractFromBluRay(QtCore.QThread):
                 '--subtitle-tracks', lang,
             ]
 
-        output = self.paths[self.title]
         if os.path.isfile(output):
             self.log.warning(
                 "%s - Output file already exists, skipping: %s",
@@ -1170,7 +1181,6 @@ class ExtractFromBluRay(QtCore.QThread):
             .get('Source FileName', None)
         )
         if title_src is None:
-            self.FAILURE.emit(output)
             self.log.error(
                 "%s - Failed to find playlist name for title '%s', "
                 "skipping.",
@@ -1185,7 +1195,6 @@ class ExtractFromBluRay(QtCore.QThread):
         elif title_src.endswith(STREAM_EXT):
             title_src = os.path.join(self.src, *STREAM_DIR, title_src)
         else:
-            self.FAILURE.emit(output)
             self.log.warning(
                 "%s - File not currently supported: %s",
                 self.src,
@@ -1232,7 +1241,6 @@ class ExtractFromBluRay(QtCore.QThread):
                 os.remove(outtmp)  # Delete the file on failure
             except Exception:
                 pass
-            self.FAILURE.emit(output)
             return False
 
         if self.on_same_filesystem(outtmp, output):
@@ -1247,10 +1255,8 @@ class ExtractFromBluRay(QtCore.QThread):
             except Exception:
                 pass
 
-            self.FAILURE.emit(output)
             return False
 
-        self.SUCCESS.emit(output)
         return True
 
     def move_file(self, src_f: str, dst_f: str) -> None:

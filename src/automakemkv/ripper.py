@@ -173,6 +173,17 @@ class DiscHandler(QtCore.QObject):
         dlg = BackupExists(output)
         return dlg.exec_()  # Return True if using existing, False otherwise
 
+    def wait(self):
+        """Wait for any ripper or extrator QThreads to finish"""
+
+        if self.ripper is not None:
+            self.ripper.wait()
+            self.irpper = None
+
+        if self.extractor is not None:
+            self.extractor.wait()
+            self.extractor = None
+
     @QtCore.pyqtSlot(str)
     def cancel(self, dev: str):
         """

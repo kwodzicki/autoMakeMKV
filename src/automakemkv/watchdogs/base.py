@@ -65,7 +65,7 @@ class BaseWatchdog(QtCore.QThread):
     def rip_failure(self, fname: str):
 
         sender = self.sender()
-        sender.join()  # Wait for thread to finish
+        sender.wait()  # Wait for thread to finish
         dev = sender.dev
         dialog = dialogs.RipFailure(dev, fname)
         self._failure.append(dialog)
@@ -87,7 +87,7 @@ class BaseWatchdog(QtCore.QThread):
         """
 
         sender = self.sender()
-        sender.join()  # Wait for thread to finish
+        sender.wait()  # Wait for thread to finish
         dev = sender.dev
         dialog = dialogs.RipSuccess(dev, fname)
         self._success.append(dialog)
@@ -109,7 +109,7 @@ class BaseWatchdog(QtCore.QThread):
         """
 
         sender = self.sender()
-        sender.join()  # Wait for thread to finish
+        sender.wait()  # Wait for thread to finish
         self.log.debug("%s - Processing finished event", sender.dev)
         sender.cancel(sender.dev)
         if sender in self._mounted:

@@ -64,7 +64,9 @@ class BaseWatchdog(QtCore.QThread):
     @QtCore.pyqtSlot(str)
     def rip_failure(self, fname: str):
 
-        dev = self.sender().dev
+        sender = self.sender()
+        sender.wait()  # Wait for thread to finish
+        dev = sender.dev
         dialog = dialogs.RipFailure(dev, fname)
         self._failure.append(dialog)
         dialog.FINISHED.connect(self._failure_closed)
@@ -84,7 +86,9 @@ class BaseWatchdog(QtCore.QThread):
 
         """
 
-        dev = self.sender().dev
+        sender = self.sender()
+        sender.wait()  # Wait for thread to finish
+        dev = sender.dev
         dialog = dialogs.RipSuccess(dev, fname)
         self._success.append(dialog)
         dialog.FINISHED.connect(self._success_closed)
@@ -105,6 +109,7 @@ class BaseWatchdog(QtCore.QThread):
         """
 
         sender = self.sender()
+        sender.wait()  # Wait for thread to finish
         self.log.debug("%s - Processing finished event", sender.dev)
         sender.cancel(sender.dev)
         if sender in self._mounted:
@@ -118,7 +123,7 @@ class BaseWatchdog(QtCore.QThread):
         sender.deleteLater()
 
     @QtCore.pyqtSlot(str)
-    def handle_insert(self, dev):
+    def handle_insert(self, dev: str):
 
         obj = ripper.DiscHandler(
             dev,

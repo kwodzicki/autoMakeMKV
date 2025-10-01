@@ -1,3 +1,4 @@
+import logging
 import os
 import sys
 import time
@@ -51,6 +52,7 @@ class DevToMount(QtCore.QThread):
     ):
         super().__init__()
 
+        self.log = logging.getLogger(__name__)
         self.dev = dev
         self.root = root
         self.uname = os.getlogin()
@@ -66,17 +68,23 @@ class DevToMount(QtCore.QThread):
         if sys.platform.startswith('win'):
             return self.dev
 
-        t0 = time.monotonic()
-        t1 = t0 + TIMEOUT
+        t1 = time.monotonic() + TIMEOUT
+        self.log.debug(
+            "%s - Looking for mount point in: %s",
+            self.dev,
+            self.root,
+        )
 
         # While we have not timed out
         while time.monotonic() < t1:
             path = self.iter_items()
             if path is not None:
+                self.log.debug("%s - Found path: %s", self.dev, path)
                 return path
 
             time.sleep(3.0)
 
+        self.log.debug("%s - Failed to find mount point", self.dev)
         return None
 
     def iter_items(self) -> str | None:

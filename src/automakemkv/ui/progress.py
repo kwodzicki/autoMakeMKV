@@ -339,7 +339,7 @@ class BasicProgressWidget(QtWidgets.QWidget):
 
         self.setLayout(layout)
 
-        self.thread = ProgressParser(proc, pipe=pipe)
+        self.thread = ProgressParser(dev, proc, pipe=pipe)
         self.thread.PROGRESS_TITLE.connect(self.progress_title)
         self.thread.PROGRESS_VALUE.connect(self.progress_value)
 
@@ -390,6 +390,10 @@ class BasicProgressWidget(QtWidgets.QWidget):
         self.disc_prog.setMaximum(maximum)
         self.disc_prog.setValue(total)
         self._disc_frac = total / maximum
+
+    def wait(self):
+        if self.thread is not None:
+            self.thread.wait()
 
     def close(self, *args, **kwargs):
         """Overload to ensure timer thread stopped"""
@@ -463,12 +467,15 @@ class ProgressParser(QtCore.QThread):
 
     def __init__(
         self,
+        dev: str,
         proc: Popen | None = None,
         pipe: str | None = None,
     ):
         super().__init__()
         self.log = logging.getLogger(__name__)
+        self.dev = dev
         self.t0 = None
+
         self._lock = Lock()
         self._proc = None
         self._pipe = None
@@ -490,6 +497,11 @@ class ProgressParser(QtCore.QThread):
     def pipe(self):
         with self._lock:
             return self._pipe
+
+    def wait(self):
+        self.log.debug("%s - Forgetting the process and waiting", self.dev)
+        self.update_proc_pipe(proc=None)
+        super().wait()
 
     def run(self):
 
@@ -515,10 +527,14 @@ class ProgressParser(QtCore.QThread):
             elif MKVMERGE in self.cli:
                 self.parse_mkvmerge(line)
             else:
-                self.log.debug("Parser not implemented for: %s", self.cli)
+                self.log.debug(
+                    "%s - Parser not implemented for: %s",
+                    self.dev,
+                    self.cli,
+                )
 
         self.PROGRESS_VALUE.emit(-1, -1, -1)
-        self.log.debug("Progress processor thread dead")
+        self.log.debug("%s - Progress processor thread dead", self.dev)
 
     def update_proc_pipe(self, proc=None, pipe=None):
         with self._lock:

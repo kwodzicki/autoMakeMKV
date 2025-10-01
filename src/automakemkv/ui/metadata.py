@@ -348,6 +348,7 @@ class DiscMetadataEditor(dialogs.MyQDialog):
         # Remove the progress widget from the window if exists
         if self.progress is not None:
             self.layout().removeWidget(self.progress)
+            self.progress.wait()
             self.progress.deleteLater()
             self.progress = None
 

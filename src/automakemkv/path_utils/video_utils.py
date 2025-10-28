@@ -107,7 +107,7 @@ def series(
 
     log = logging.getLogger(__name__)
 
-    if info['extra'] != '':
+    if info['extra'] not in ('', 'edition'):
         return None
 
     season = int(info['season'])

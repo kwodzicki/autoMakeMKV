@@ -3,7 +3,7 @@ import time
 from datetime import timedelta
 
 import re
-from threading import Lock
+from threading import Lock, Event
 from subprocess import Popen
 
 from PyQt5 import QtWidgets
@@ -477,6 +477,7 @@ class ProgressParser(QtCore.QThread):
         self.t0 = None
 
         self._lock = Lock()
+        self._event = Event()
         self._proc = None
         self._pipe = None
         self._cli = ''
@@ -501,14 +502,17 @@ class ProgressParser(QtCore.QThread):
     def wait(self):
         self.log.debug("%s - Forgetting the process and waiting", self.dev)
         self.update_proc_pipe(proc=None)
+        self._event.set()  # Ensure that the thread starts/exits before wait
         super().wait()
 
     def run(self):
+        """
+        Parse subprocess output in separate thread
 
-        while self.proc is None or self.proc.poll() is None:
-            if self.proc is None:
-                time.sleep(0.5)
-                continue
+        """
+
+        self._event.wait()  # Wait for event to be set; is set when proc set
+        while self.proc is not None and self.proc.poll() is None:
 
             pipe = getattr(self.proc, self.pipe, None)
             if pipe is None:
@@ -538,11 +542,13 @@ class ProgressParser(QtCore.QThread):
 
     def update_proc_pipe(self, proc=None, pipe=None):
         with self._lock:
+            self._pipe = pipe
+            self._proc = proc
             if proc is not None:
-                self._proc = proc
                 self._cli = proc.args[0]
-            if pipe is not None:
-                self._pipe = pipe
+                self._event.set()
+            else:
+                self._cli = ''
 
     def parse_makemkvcon(self, line):
         """

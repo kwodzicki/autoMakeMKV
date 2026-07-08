@@ -252,7 +252,9 @@ class DiscHandler(QtCore.QObject):
         it exists or open GUI for user to input information
 
         Arguments:
-            dev (str) : Device to rip from
+            hashid (str) : Checksum/hash of the disc
+            is_bluray (bool): Is the disc a bluray or not based on directory
+                structure
 
         """
 
@@ -293,6 +295,19 @@ class DiscHandler(QtCore.QObject):
 
     @QtCore.pyqtSlot(int)
     def existing_disc(self, result: int):
+        """
+        Handler for disc that exists in database
+
+        If a disc hash exists in the database, then this method is called
+        to display a time-delayed close window prompting the user what to
+        do with the disc; ignore the disc, open the metdata window to edit
+        information, or save data from the disc.
+
+        Arguments:
+            result (int): Flag indicating what to do with the disc. See the
+                global attributes IGNORE, SAVE, RIP, etc.
+
+        """
 
         # If metadata attribute is not None, then must be new disc or
         # the user edited/updated something

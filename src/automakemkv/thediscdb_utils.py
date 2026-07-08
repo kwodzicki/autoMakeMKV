@@ -1,5 +1,6 @@
 import logging
 
+import argparse
 import os
 import re
 import json
@@ -301,3 +302,33 @@ def item_checker(
     return path, metadata, release, titles, mkvdump
     if isinstance(content_hash, str):
         return None
+
+
+def cli():
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        'discdb',
+        type=str,
+        help='Path to discdb directory or zip file from GitHub',
+    )
+    parser.add_argument(
+        '--automakemkv',
+        type=str,
+        help='Path to autoMakeMKV database',
+    )
+    parser.add_argument(
+        '-u', '--update',
+        action='store_true',
+        help='Set to run update for exising files',
+    )
+
+    args = parser.parse_args()
+    thediscdb_to_automakemkv(
+        args.discdb,
+        automakemkv_path=args.automakemkv,
+        update=args.update,
+    )
+
+
+if __name__ == "__main__":
+    cli()

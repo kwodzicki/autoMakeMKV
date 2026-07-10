@@ -40,6 +40,7 @@ Homepage = "https://github.com/kwodzicki/autoMakeMKV"
 
 [project.scripts]
 autoMakeMKV = "automakemkv.ui.main:cli"
+discdb_to_automakemkv = "automakemkv.thediscdb_utils:cli"
 
 [tool.setuptools.packages.find]
 where = ["src"]

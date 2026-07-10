@@ -112,6 +112,8 @@ class BaseWatchdog(QtCore.QThread):
         sender.wait()  # Wait for thread to finish
         self.log.debug("%s - Processing finished event", sender.dev)
         sender.cancel(sender.dev)
+        self.log.debug("%s - Sender obj   : %s", sender.dev, sender)
+        self.log.debug("%s - Mounted list : %s", sender.dev, self._mounted)
         if sender in self._mounted:
             self._mounted.remove(sender)
         else:

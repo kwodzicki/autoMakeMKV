@@ -12,6 +12,7 @@ from . import dialogs
 from . import progress
 
 SIZEKEY = 'Disk Size (Bytes)'
+MATCHKEYS = ('Source Title Id', 'Source FileName')
 
 BACKUP_THEN_TAG = 4
 RIP = 3
@@ -36,6 +37,9 @@ class DiscMetadataEditor(dialogs.MyQDialog):
         backed_up: bool = False,
         **kwargs,
     ):
+        """
+
+        """
 
         super().__init__(*args, **kwargs)
 
@@ -344,6 +348,14 @@ class DiscMetadataEditor(dialogs.MyQDialog):
         self.titleMetadata.setInfo(obj.info)
 
     def buildTitleTree(self, info=None):
+        """
+        Build selection window for titles to extract
+
+        Arguments:
+            info (dict): Metadata information to use for selecting tracks
+                to extract.
+
+        """
 
         # Remove the progress widget from the window if exists
         if self.progress is not None:
@@ -379,8 +391,13 @@ class DiscMetadataEditor(dialogs.MyQDialog):
             title.makeMKVInfo = titleInfo
             title.isTitle = True
             title.titleID = titleID
-            if titleID in infoTitles:
-                title.info = infoTitles[titleID]
+
+            # Check if the title from the disc matches any of the metadata
+            # and get said metadata. We can reuse info here as is not used
+            # later in the method.
+            info = self._check_title_match(titleInfo, infoTitles)
+            if len(info) > 0:
+                title.info = info
                 title.setCheckState(0, 2)
             else:
                 keys = ['Source Title Id', 'Source FileName', 'Segments Map']
@@ -411,6 +428,41 @@ class DiscMetadataEditor(dialogs.MyQDialog):
         self.save_but.setEnabled(True)
         self.backup_tag.setEnabled(True)
         self.rip_but.setEnabled(True)
+
+    @staticmethod
+    def _check_title_match(titleInfo: dict, infoTitles: dict) -> dict:
+        """
+        Check that title from disc scan match metadata
+
+        Given a titel from a disc scan, check that it matches a title in the
+        metadata dict for the setting of checkbox.
+
+        Arguments:
+            titleInfo (dict): Information about a given title from the
+                disc scan
+            infoTtitles (dict): All titles from the metadata of the disc
+
+        Returns:
+            dict: Metadata information for the title. Is emtpy if no match
+
+        """
+
+        # Iterate over MATCHKEYS to get any non-empty data from titleInfo
+        match_info = {
+            key: titleInfo[key]
+            for key in MATCHKEYS
+            if titleInfo.get(key, '') != ''
+        }
+
+        # Loop over all titles in infoTitles and check if data in infoTitle
+        # matches that of data from match_info
+        for tid, info in infoTitles.items():
+            for mkey, mval in match_info.items():
+                if info.get(mkey, '') == mval:
+                    return info
+
+        # If here, no matches found; retuns emtpy dict
+        return {}
 
 
 class ExistingDiscOptions(dialogs.MyQDialog):
